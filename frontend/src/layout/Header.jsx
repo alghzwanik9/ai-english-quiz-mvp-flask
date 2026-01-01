@@ -3,6 +3,7 @@ import { cn } from "../ui/cn";
 export default function Header({
   title = "Dashboard",
   lang = "EN",
+  isRtl = false,
   onToggleLang,
   onOpenMobileMenu,
   user = { name: "Teacher" },
@@ -13,8 +14,13 @@ export default function Header({
     <header className="sticky top-0 z-30">
       <div className="border-b border-slate-200/60 bg-white/70 backdrop-blur-xl">
         <div className="px-4 lg:px-6 py-4">
-          <div className="flex items-center justify-between gap-3">
-            {/* Left: mobile menu + title */}
+          <div
+            className={cn(
+              "flex items-center justify-between gap-3",
+              isRtl && "flex-row-reverse"
+            )}
+          >
+            {/* Side A: menu + title */}
             <div className="flex items-center gap-3 min-w-0">
               <button
                 type="button"
@@ -22,7 +28,6 @@ export default function Header({
                 className="grid place-items-center h-10 w-10 rounded-xl border border-slate-200/70 bg-white/80 hover:bg-white transition"
                 aria-label="Open menu"
               >
-                {/* burger */}
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                   <path
                     d="M4 7h16M4 12h16M4 17h16"
@@ -33,7 +38,7 @@ export default function Header({
                 </svg>
               </button>
 
-              <div className="min-w-0">
+              <div className={cn("min-w-0", isRtl ? "text-right" : "text-left")}>
                 <div className="text-xl font-extrabold text-slate-900 truncate">
                   {title}
                 </div>
@@ -43,9 +48,8 @@ export default function Header({
               </div>
             </div>
 
-            {/* Right: actions */}
+            {/* Side B: actions */}
             <div className="flex items-center gap-2 lg:gap-3">
-              {/* CTA */}
               {cta?.label && (
                 <button
                   type="button"
@@ -56,7 +60,6 @@ export default function Header({
                 </button>
               )}
 
-              {/* Language pill */}
               <button
                 type="button"
                 onClick={onToggleLang}
@@ -70,10 +73,9 @@ export default function Header({
                 {lang}
               </button>
 
-              {/* User chip */}
               <div className="hidden sm:flex items-center gap-2 px-3 h-10 rounded-xl border border-slate-200/70 bg-white/90 shadow-sm">
                 <div className="h-7 w-7 rounded-full bg-slate-200" />
-                <div className="leading-4">
+                <div className={cn("leading-4", isRtl ? "text-right" : "text-left")}>
                   <div className="text-sm font-semibold text-slate-900">
                     {user?.name || "User"}
                   </div>
@@ -81,7 +83,6 @@ export default function Header({
                 </div>
               </div>
 
-              {/* Logout */}
               <button
                 type="button"
                 onClick={onLogout}
