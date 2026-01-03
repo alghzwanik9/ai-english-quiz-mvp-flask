@@ -2,18 +2,19 @@ import { cn } from "../ui/cn";
 
 export default function Header({
   title = "Dashboard",
-  lang = "EN",
+  lang = "en",
   isRtl = false,
   onToggleLang,
   onOpenMobileMenu,
   user = { name: "Teacher" },
   onLogout,
-  cta, // { label, onClick }
+  cta,
 }) {
   return (
     <header className="sticky top-0 z-30">
       <div className="border-b border-slate-200/60 bg-white/70 backdrop-blur-xl">
         <div className="px-4 lg:px-6 py-4">
+          {/* ✅ نقلب توزيع الجهتين بالكامل في RTL */}
           <div
             className={cn(
               "flex items-center justify-between gap-3",
@@ -21,11 +22,17 @@ export default function Header({
             )}
           >
             {/* Side A: menu + title */}
-            <div className="flex items-center gap-3 min-w-0">
+            <div
+              className={cn(
+                "flex items-center gap-3 min-w-0 flex-1",
+                // ✅ داخل Side A: نخلي زر الثلاث خطوط يصير يمين النص في RTL
+                isRtl ? "justify-end flex-row-reverse" : "justify-start"
+              )}
+            >
               <button
                 type="button"
                 onClick={onOpenMobileMenu}
-                className="grid place-items-center h-10 w-10 rounded-xl border border-slate-200/70 bg-white/80 hover:bg-white transition"
+                className="grid place-items-center h-10 w-10 rounded-xl border border-slate-200/70 bg-white/80 hover:bg-white transition shrink-0"
                 aria-label="Open menu"
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -38,7 +45,12 @@ export default function Header({
                 </svg>
               </button>
 
-              <div className={cn("min-w-0", isRtl ? "text-right" : "text-left")}>
+              <div
+                className={cn(
+                  "min-w-0 flex flex-col",
+                  isRtl ? "text-right items-end" : "text-left items-start"
+                )}
+              >
                 <div className="text-xl font-extrabold text-slate-900 truncate">
                   {title}
                 </div>
@@ -48,7 +60,7 @@ export default function Header({
               </div>
             </div>
 
-            {/* Side B: actions */}
+            {/* Side B: actions (بتصير يسار تلقائياً بسبب flex-row-reverse فوق) */}
             <div className="flex items-center gap-2 lg:gap-3">
               {cta?.label && (
                 <button
@@ -70,7 +82,7 @@ export default function Header({
                 aria-label="Toggle language"
                 title="Toggle language"
               >
-                {lang}
+                {lang === "ar" ? "AR" : "EN"}
               </button>
 
               <div className="hidden sm:flex items-center gap-2 px-3 h-10 rounded-xl border border-slate-200/70 bg-white/90 shadow-sm">

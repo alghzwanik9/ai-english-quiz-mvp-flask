@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import { cn } from "../ui/cn";
+import { STRINGS } from "../i18n/strings";
 
 export default function AppShell({
   title,
@@ -10,45 +11,58 @@ export default function AppShell({
   onNavigate,
   children,
 }) {
+  // ===== حالات الواجهة (State) =====
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [lang, setLang] = useState("EN");
-  const dir = useMemo(() => (lang === "AR" ? "rtl" : "ltr"), [lang]);
+  const [lang, setLang] = useState(() => localStorage.getItem("lang") || "en");
+
+  // ===== الترجمة + اتجاه الصفحة =====
+  const t = STRINGS[lang] || STRINGS.en;
+  const dir = useMemo(() => (lang === "ar" ? "rtl" : "ltr"), [lang]);
   const isRtl = dir === "rtl";
 
-  // اقفل الدرج بـ ESC + امنع سكرول الخلفية وقت الفتح
+  // ===== سلوك الدرج: ESC + منع سكرول الخلفية وقت فتح الدرج =====
   useEffect(() => {
     const onKeyDown = (e) => {
       if (e.key === "Escape") setDrawerOpen(false);
     };
+
     if (drawerOpen) {
       document.addEventListener("keydown", onKeyDown);
       document.body.style.overflow = "hidden";
     }
+
     return () => {
       document.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = "";
     };
   }, [drawerOpen]);
 
-  // اتجاه الدرج حسب اللغة
+  // ===== حفظ اللغة وتحديث خصائص HTML (lang/dir) =====
+  useEffect(() => {
+    localStorage.setItem("lang", lang);
+    document.documentElement.lang = lang;
+    document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
+  }, [lang]);
+
+  // ===== اتجاه الدرج حسب RTL/LTR =====
   const drawerSide = isRtl ? "right-0" : "left-0";
   const drawerClosedTransform = isRtl ? "translate-x-full" : "-translate-x-full";
 
   return (
     <div dir={dir} className="app-bg text-slate-900 min-h-screen">
-      {/* Top Navbar */}
+      {/* ===== الهيدر العلوي ===== */}
       <Header
         title={title}
         lang={lang}
         isRtl={isRtl}
-        onToggleLang={() => setLang((p) => (p === "AR" ? "EN" : "AR"))}
+        onToggleLang={() => setLang((p) => (p === "ar" ? "en" : "ar"))}
         onOpenMobileMenu={() => setDrawerOpen(true)}
-        user={{ name: role === "teacher" ? "Teacher" : "Student" }}
+        user={{ name: role === "teacher" ? t.teacher : t.student }}
         onLogout={() => alert("Logout")}
-        cta={{ label: "Create Test", onClick: () => onNavigate?.("create") }}
+        cta={{ label: t.createTest, onClick: () => onNavigate?.("create") }}
       />
 
-      {/* Drawer Sidebar (Animated) */}
+      {/* ===== درج السايدبار (للجوال) ===== */}
       <div
         className={cn(
           "fixed inset-0 z-50",
@@ -56,7 +70,7 @@ export default function AppShell({
         )}
         aria-hidden={!drawerOpen}
       >
-        {/* Overlay */}
+        {/* طبقة التعتيم (Overlay) */}
         <div
           className={cn(
             "absolute inset-0 bg-black/30 transition-opacity duration-200",
@@ -65,7 +79,7 @@ export default function AppShell({
           onClick={() => setDrawerOpen(false)}
         />
 
-        {/* Panel */}
+        {/* لوحة الدرج */}
         <div
           className={cn(
             "absolute top-0 h-full w-[18rem] sm:w-80 bg-white shadow-2xl",
@@ -77,32 +91,36 @@ export default function AppShell({
           aria-modal="true"
         >
           <div className="h-full flex flex-col">
+            {/* رأس الدرج */}
             <div className="px-4 py-3 border-b flex items-center justify-between">
-              <div className="font-bold text-slate-900">Menu</div>
+              <div className="font-bold text-slate-900">{t.menu}</div>
               <button
                 type="button"
                 onClick={() => setDrawerOpen(false)}
                 className="h-9 px-3 rounded-lg border border-slate-200 hover:bg-slate-50"
               >
-                Close
+                {t.close}
               </button>
             </div>
 
+            {/* قائمة السايدبار */}
             <div className="flex-1 overflow-auto">
               <Sidebar
                 role={role}
                 active={active}
+                isRtl={isRtl}
                 onNavigate={(k) => {
                   onNavigate?.(k);
                   setDrawerOpen(false);
                 }}
               />
+
             </div>
           </div>
         </div>
       </div>
 
-      {/* Main content */}
+      {/* ===== محتوى الصفحة ===== */}
       <main className="shell">{children}</main>
     </div>
   );

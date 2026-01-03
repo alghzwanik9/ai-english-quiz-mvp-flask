@@ -13,6 +13,82 @@ from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
+# ===== Simple JSON storage (materials) =====
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+MATERIALS_FILE = os.path.join(DATA_DIR, "materials.json")
+
+def _ensure_data_dir():
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+def _load_json(path: str, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return default
+    except Exception:
+        return default
+
+def _save_json(path: str, payload):
+    _ensure_data_dir()
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+def _now_iso():
+    return time.strftime("%Y-%m-%dT%H:%M:%S")
+
+def _new_id(prefix="mat"):
+    raw = f"{prefix}:{time.time()}:{random.random()}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+
+# ===== API: Health =====
+@app.get("/api/health")
+def api_health():
+    return jsonify({
+        "ok": True,
+        "use_ollama": USE_OLLAMA,
+        "ollama_url": OLLAMA_URL,
+        "model": OLLAMA_MODEL
+    })
+
+# ===== API: Materials =====
+@app.get("/api/materials")
+def list_materials():
+    data = _load_json(MATERIALS_FILE, {"materials": []})
+    return jsonify(data["materials"])
+
+@app.post("/api/materials")
+def create_material():
+    body = request.get_json(silent=True) or {}
+    name = (body.get("name") or "").strip()
+    description = (body.get("description") or "").strip()
+    level = (body.get("level") or "").strip()  # optional
+
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+
+    data = _load_json(MATERIALS_FILE, {"materials": []})
+    mat = {
+        "id": _new_id("mat"),
+        "name": name,
+        "description": description,
+        "level": level,
+        "created_at": _now_iso(),
+    }
+    data["materials"].insert(0, mat)
+    _save_json(MATERIALS_FILE, data)
+    return jsonify(mat), 201
+
+@app.get("/api/materials/<mat_id>")
+def get_material(mat_id):
+    data = _load_json(MATERIALS_FILE, {"materials": []})
+    for m in data["materials"]:
+        if m["id"] == mat_id:
+            return jsonify(m)
+    return jsonify({"error": "not found"}), 404
 
 # ===== Ollama / LLaMA config =====
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")

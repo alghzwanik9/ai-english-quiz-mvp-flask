@@ -40,7 +40,12 @@ function Icon({ name, className = "" }) {
     case "imports":
       return (
         <svg className={cn(base, className)} viewBox="0 0 24 24" fill="none">
-          <path d="M12 3v10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          <path
+            d="M12 3v10"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
           <path
             d="M8 9l4 4 4-4"
             stroke="currentColor"
@@ -48,7 +53,12 @@ function Icon({ name, className = "" }) {
             strokeLinecap="round"
             strokeLinejoin="round"
           />
-          <path d="M5 21h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          <path
+            d="M5 21h14"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
         </svg>
       );
     case "settings":
@@ -80,16 +90,27 @@ const teacherNav = [
   { key: "settings", label: "Settings", icon: "settings" },
 ];
 
-export default function Sidebar({ role = "teacher", active = "dashboard", onNavigate }) {
+export default function Sidebar({
+  role = "teacher",
+  active = "dashboard",
+  onNavigate,
+  isRtl = false,
+}) {
   const items = role === "teacher" ? teacherNav : teacherNav;
 
   return (
     <aside className="h-full w-72">
-      <div className="h-full border-r border-slate-200/60 bg-white/70 backdrop-blur-xl">
+      <div
+        className={cn(
+          "h-full bg-white/70 backdrop-blur-xl",
+          isRtl ? "border-l border-slate-200/60" : "border-r border-slate-200/60"
+        )}
+      >
+        {/* رأس السايدبار */}
         <div className="px-5 pt-5 pb-4">
-          <div className="flex items-center gap-3">
+          <div className={cn("flex items-center gap-3", isRtl && "flex-row-reverse")}>
             <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-indigo-600 to-blue-600 shadow-sm" />
-            <div>
+            <div className={cn(isRtl ? "text-right" : "text-left")}>
               <div className="font-extrabold text-slate-900 leading-5">AI English Quiz</div>
               <div className="text-xs text-slate-500">
                 {role === "teacher" ? "Teacher Panel" : "Student Panel"}
@@ -98,6 +119,7 @@ export default function Sidebar({ role = "teacher", active = "dashboard", onNavi
           </div>
         </div>
 
+        {/* روابط التنقل */}
         <nav className="px-3 pb-5 space-y-1">
           {items.map((it) => {
             const isActive = it.key === active;
@@ -106,7 +128,8 @@ export default function Sidebar({ role = "teacher", active = "dashboard", onNavi
                 key={it.key}
                 onClick={() => onNavigate?.(it.key)}
                 className={cn(
-                  "group w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition",
+                  "group w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition",
+                  isRtl ? "text-right flex-row-reverse" : "text-left",
                   isActive
                     ? "bg-indigo-50/80 text-indigo-700 border border-indigo-100 shadow-sm"
                     : "text-slate-700 hover:bg-white/70 hover:shadow-sm"
@@ -120,19 +143,29 @@ export default function Sidebar({ role = "teacher", active = "dashboard", onNavi
                       : "bg-slate-50/70 border-slate-200/60 group-hover:bg-white"
                   )}
                 >
-                  <Icon name={it.icon} className={isActive ? "text-indigo-700" : "text-slate-600"} />
+                  <Icon
+                    name={it.icon}
+                    className={isActive ? "text-indigo-700" : "text-slate-600"}
+                  />
                 </span>
 
                 <span className="font-semibold">{it.label}</span>
-                <span className={cn("ml-auto h-2 w-2 rounded-full", isActive ? "bg-indigo-600" : "bg-transparent")} />
+
+                <span
+                  className={cn(
+                    isRtl ? "mr-auto" : "ml-auto",
+                    "h-2 w-2 rounded-full",
+                    isActive ? "bg-indigo-600" : "bg-transparent"
+                  )}
+                />
               </button>
             );
           })}
         </nav>
 
+        {/* الفوتر */}
         <div className="px-5 pb-5 pt-2 border-t border-slate-200/60 text-xs text-slate-400">
-       v1 • TESTING
-
+          v1 • TESTING
         </div>
       </div>
     </aside>
