@@ -4,6 +4,7 @@ import re
 import random
 import time
 import hashlib
+import sqlite3
 from typing import Any, Dict, List, Tuple, Optional
 
 import requests
@@ -11,12 +12,26 @@ import pdfplumber
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
+
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
-# ===== Simple JSON storage (materials) =====
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 MATERIALS_FILE = os.path.join(DATA_DIR, "materials.json")
+
+DB_PATH = os.getenv("DB_PATH", "app.db")
+
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+OLLAMA_URL = os.getenv("OLLAMA_URL", f"{OLLAMA_BASE_URL}/api/generate")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b-instruct-q4_K_M")
+USE_OLLAMA = os.getenv("USE_OLLAMA", "0") == "1"
+
+
+OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.9"))
+OLLAMA_TOP_P = float(os.getenv("OLLAMA_TOP_P", "0.95"))
+OLLAMA_REPEAT_PENALTY = float(os.getenv("OLLAMA_REPEAT_PENALTY", "1.15"))
+
 
 def _ensure_data_dir():
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -43,6 +58,253 @@ def _now_iso():
 def _new_id(prefix="mat"):
     raw = f"{prefix}:{time.time()}:{random.random()}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def ensure_questions_table():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS questions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        material TEXT NOT NULL,
+        topic TEXT,
+        difficulty TEXT,
+        qtype TEXT NOT NULL,
+        question TEXT NOT NULL,
+        choices_json TEXT,
+        answer TEXT NOT NULL,
+        explanation TEXT,
+        source TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    )
+    """)
+    conn.commit()
+    conn.close()
+
+ensure_questions_table()
+
+def build_prompt(material: str, topic: str, difficulty: str, n: int):
+    return f"""
+You are a question generator for teachers.
+
+Create EXACTLY {n} multiple-choice questions (MCQ) about:
+- Material: {material}
+- Topic: {topic or "General"}
+- Difficulty: {difficulty}
+
+STRICT OUTPUT RULES:
+1) Output MUST be valid JSON only. No markdown, no explanation, no extra text.
+2) Output format MUST be exactly:
+{{
+  "questions": [
+    {{
+      "qtype": "mcq",
+      "question": "...",
+      "choices": ["A","B","C","D"],
+      "answer": "A",
+      "explanation": "..."
+    }}
+  ]
+}}
+3) choices MUST be exactly 4 items.
+4) answer MUST match one of the 4 choices exactly.
+"""
+
+@app.get("/api/ai/questions")
+def list_saved_questions():
+    material = (request.args.get("material") or "").strip()
+    limit = int(request.args.get("limit") or 50)
+    limit = max(1, min(limit, 200))
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    if material:
+        rows = cur.execute(
+            "SELECT id, material, topic, difficulty, qtype, question, choices_json, answer, explanation, source, created_at "
+            "FROM questions WHERE material = ? ORDER BY id DESC LIMIT ?",
+            (material, limit),
+        ).fetchall()
+    else:
+        rows = cur.execute(
+            "SELECT id, material, topic, difficulty, qtype, question, choices_json, answer, explanation, source, created_at "
+            "FROM questions ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+    conn.close()
+
+    out = []
+    for r in rows:
+        out.append({
+            "id": r["id"],
+            "material": r["material"],
+            "topic": r["topic"],
+            "difficulty": r["difficulty"],
+            "qtype": r["qtype"],
+            "question": r["question"],
+            "choices": json.loads(r["choices_json"] or "[]"),
+            "answer": r["answer"],
+            "explanation": r["explanation"],
+            "source": r["source"],
+            "created_at": r["created_at"],
+        })
+
+    return jsonify({"ok": True, "items": out})
+
+
+def extract_json_object(text: str):
+    """
+    Try to extract a JSON object from a messy LLM response.
+    Supports:
+    - pure JSON
+    - JSON wrapped in ```json ... ```
+    - extra text before/after JSON
+    """
+    if not text:
+        raise ValueError("Empty response")
+
+    t = text.strip()
+    # remove code fences if present
+    t = re.sub(r"^```(?:json)?\s*", "", t)
+    t = re.sub(r"\s*```$", "", t)
+
+    # try direct parse first
+    try:
+        return json.loads(t)
+    except Exception:
+        pass
+
+    # try to find a JSON object substring { ... }
+    m = re.search(r"\{.*\}", t, flags=re.S)
+    if not m:
+        raise ValueError("No JSON object found in response")
+    return json.loads(m.group(0))
+
+
+def try_ollama_generate(prompt: str, timeout_sec: int = 60):
+    payload = {
+        "model": OLLAMA_MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "format": "json",  # ✅ هذا أهم سطر: يجبر الرد يكون JSON صحيح
+        "options": {
+            "temperature": 0.2
+        }
+    }
+
+    r = requests.post(OLLAMA_URL, json=payload, timeout=timeout_sec)
+    r.raise_for_status()
+
+    text = (r.json().get("response") or "").strip()
+
+    # غالبًا بعد format=json بيكون JSON نظيف، بس نخلي الاستخراج احتياط
+    obj = extract_json_object(text)
+
+    if not isinstance(obj, dict) or "questions" not in obj:
+        raise ValueError("Invalid JSON format: missing 'questions'")
+
+    return obj
+
+
+def fallback_questions(material: str, topic: str, difficulty: str, n: int):
+    out = []
+    for i in range(n):
+        out.append({
+            "qtype": "mcq",
+            "question": f"[Fallback Q{i+1}] What is the goal of studying {topic or material}?",
+            "choices": ["Understanding", "Memorizing", "Ignoring", "Skipping"],
+            "answer": "Understanding",
+            "explanation": "Learning focuses on understanding."
+        })
+    return {"questions": out}
+
+
+def normalize_questions(payload: dict):
+    qs = payload.get("questions") or []
+    cleaned = []
+    for q in qs:
+        question = (q.get("question") or "").strip()
+        choices = q.get("choices") or []
+        answer = (q.get("answer") or "").strip()
+        explanation = (q.get("explanation") or "").strip()
+
+        if not question:
+            continue
+        if not isinstance(choices, list):
+            choices = []
+        choices = [str(c).strip() for c in choices if str(c).strip()]
+        while len(choices) < 4:
+            choices.append(f"خيار {len(choices)+1}")
+        choices = choices[:4]
+
+        if answer in {"A","B","C","D"}:
+            answer = choices[{"A":0,"B":1,"C":2,"D":3}[answer]]
+        if answer not in choices:
+            answer = choices[0]
+
+        cleaned.append({
+            "qtype": "mcq",
+            "question": question,
+            "choices": choices,
+            "answer": answer,
+            "explanation": explanation
+        })
+    return cleaned
+
+def save_questions(material: str, topic: str, difficulty: str, questions: list, source: str):
+    conn = get_db()
+    cur = conn.cursor()
+    now = int(time.time())
+    ids = []
+    for q in questions:
+        cur.execute("""
+        INSERT INTO questions (material, topic, difficulty, qtype, question, choices_json, answer, explanation, source, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            material, topic, difficulty, q["qtype"], q["question"],
+            json.dumps(q["choices"], ensure_ascii=False),
+            q["answer"], q.get("explanation",""),
+            source, now
+        ))
+        ids.append(cur.lastrowid)
+    conn.commit()
+    conn.close()
+    return ids
+
+@app.post("/api/ai/generate-questions")
+
+def ai_generate_questions():
+    body = request.get_json(force=True, silent=True) or {}
+    material = (body.get("material") or "").strip()
+    topic = (body.get("topic") or "").strip()
+    difficulty = (body.get("difficulty") or "medium").strip().lower()
+    count = int(body.get("count") or 5)
+    if not material:
+        return jsonify({"ok": False, "error": "material is required"}), 400
+    count = max(1, min(count, 20))
+
+    prompt = build_prompt(material, topic, difficulty, count)
+
+    used_source = "fallback"
+      
+    try:
+        payload = try_ollama_generate(prompt)
+        questions = normalize_questions(payload)
+        if not questions:
+            raise ValueError("No questions returned")
+        used_source = "ollama"
+    except Exception:
+        questions = normalize_questions(fallback_questions(material, topic, difficulty, count))
+
+
+
+    ids = save_questions(material, topic, difficulty, questions, used_source)
+    return jsonify({"ok": True, "source": used_source, "saved_ids": ids, "questions": questions})
+
 
 # ===== API: Health =====
 @app.get("/api/health")
@@ -90,10 +352,12 @@ def get_material(mat_id):
             return jsonify(m)
     return jsonify({"error": "not found"}), 404
 
-# ===== Ollama / LLaMA config =====
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
-USE_OLLAMA = os.getenv("USE_OLLAMA", "0") == "1"
+# ===== Ollama / LLaMA config (FIXED) =====
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+OLLAMA_URL = os.getenv("OLLAMA_URL", f"{OLLAMA_BASE_URL}/api/generate")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b-instruct-q4_K_M")
+USE_OLLAMA = True
+
 
 # Tuning for diversity (Ollama options)
 OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.9"))

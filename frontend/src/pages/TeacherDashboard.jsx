@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import Card, { CardContent, CardDesc, CardHeader, CardTitle } from "../ui/Card";
 import Button from "../ui/Button";
 import { cn } from "../ui/cn";
@@ -85,11 +86,64 @@ function StatCard({ label, value, icon, trend }) {
   );
 }
 
+function Field({ label, children }) {
+  return (
+    <label className="block">
+      <div className="text-xs font-semibold text-slate-600">{label}</div>
+      <div className="mt-2">{children}</div>
+    </label>
+  );
+}
+
 export default function TeacherDashboard({ go }) {
   const tests = [
     { id: 1, name: "Basics 1", subject: "Grammar", q: 10, date: "2025-12-29" },
     { id: 2, name: "Vocabulary A", subject: "Vocab", q: 15, date: "2025-12-28" },
   ];
+
+  const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:5000";
+
+  // AI form
+  const [aiOpen, setAiOpen] = useState(false);
+  const [material, setMaterial] = useState("English Grammar");
+  const [topic, setTopic] = useState("Past Simple");
+  const [difficulty, setDifficulty] = useState("easy");
+  const [count, setCount] = useState(5);
+
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [aiResult, setAiResult] = useState(null);
+
+  const generateAI = async () => {
+    setErr("");
+    setLoading(true);
+    setAiResult(null);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/generate-questions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          material,
+          topic,
+          difficulty,
+          count: Number(count) || 5,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || `HTTP ${res.status}`);
+      }
+      setAiResult(data);
+    } catch (e) {
+      setErr(e?.message || "Failed to generate");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const questions = useMemo(() => aiResult?.questions || [], [aiResult]);
 
   return (
     <div className="space-y-6">
@@ -109,8 +163,7 @@ export default function TeacherDashboard({ go }) {
                 <CardDesc>Quick view of your latest created tests</CardDesc>
               </div>
 
-             <Button size="sm" onClick={() => go?.("create")}>Create</Button>
-
+              <Button size="sm" onClick={() => go?.("create")}>Create</Button>
             </div>
           </CardHeader>
 
@@ -161,7 +214,7 @@ export default function TeacherDashboard({ go }) {
               <div className="font-semibold text-slate-900">Create New Test</div>
               <div className="text-sm text-slate-600 mt-1">Build manually from question bank.</div>
               <div className="mt-3">
-                <Button size="sm">Create</Button>
+                <Button size="sm" onClick={() => go?.("create")}>Create</Button>
               </div>
             </button>
 
@@ -169,20 +222,132 @@ export default function TeacherDashboard({ go }) {
               <div className="font-semibold text-slate-900">Import PDF / CSV</div>
               <div className="text-sm text-slate-600 mt-1">Upload content and convert into questions.</div>
               <div className="mt-3">
-<Button size="sm" variant="outline" onClick={() => go?.("imports")}>Import</Button>
+                <Button size="sm" variant="outline" onClick={() => go?.("imports")}>Import</Button>
               </div>
             </button>
 
-            <button className="rounded-2xl border border-slate-200/60 bg-white/70 p-4 text-left hover:bg-white transition">
+            <button
+              className="rounded-2xl border border-slate-200/60 bg-white/70 p-4 text-left hover:bg-white transition"
+              onClick={() => setAiOpen(true)}
+            >
               <div className="font-semibold text-slate-900">Generate with AI</div>
-              <div className="text-sm text-slate-600 mt-1">Create questions from a topic or text.</div>
+              <div className="text-sm text-slate-600 mt-1">Create questions from a topic.</div>
               <div className="mt-3">
-<Button size="sm" variant="outline" onClick={() => go?.("create")}>Generate</Button>
+                <Button size="sm" variant="outline">Generate</Button>
               </div>
             </button>
           </CardContent>
         </Card>
       </div>
+
+      {/* AI Generator Panel */}
+      {aiOpen && (
+        <Card variant="glass">
+          <CardHeader compact>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <CardTitle>AI Generator</CardTitle>
+                <CardDesc>Generate MCQ and auto-save to database.</CardDesc>
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => setAiOpen(false)}>Close</Button>
+            </div>
+          </CardHeader>
+
+          <CardContent compact className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Field label="Material">
+                <input
+                  className="w-full rounded-xl border border-slate-200/60 bg-white/70 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-200"
+                  value={material}
+                  onChange={(e) => setMaterial(e.target.value)}
+                />
+              </Field>
+
+              <Field label="Topic">
+                <input
+                  className="w-full rounded-xl border border-slate-200/60 bg-white/70 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-200"
+                  value={topic}
+                  onChange={(e) => setTopic(e.target.value)}
+                />
+              </Field>
+
+              <Field label="Difficulty">
+                <select
+                  className="w-full rounded-xl border border-slate-200/60 bg-white/70 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-200"
+                  value={difficulty}
+                  onChange={(e) => setDifficulty(e.target.value)}
+                >
+                  <option value="easy">easy</option>
+                  <option value="medium">medium</option>
+                  <option value="hard">hard</option>
+                </select>
+              </Field>
+
+              <Field label="Count">
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  className="w-full rounded-xl border border-slate-200/60 bg-white/70 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-200"
+                  value={count}
+                  onChange={(e) => setCount(e.target.value)}
+                />
+              </Field>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Button onClick={generateAI} disabled={loading}>
+                {loading ? "Generating..." : "Generate"}
+              </Button>
+
+              {aiResult?.source && (
+                <Badge>source: {aiResult.source}</Badge>
+              )}
+
+              {err && (
+                <div className="text-sm text-rose-600">{err}</div>
+              )}
+            </div>
+
+            {questions.length > 0 && (
+              <div className="rounded-2xl border border-slate-200/60 bg-white/60 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="font-semibold text-slate-900">Preview ({questions.length})</div>
+                  {Array.isArray(aiResult?.saved_ids) && (
+                    <Badge>saved: {aiResult.saved_ids.length}</Badge>
+                  )}
+                </div>
+
+                <div className="mt-3 space-y-3">
+                  {questions.map((q, idx) => (
+                    <div key={idx} className="rounded-2xl border border-slate-200/60 bg-white/70 p-3">
+                      <div className="text-sm font-semibold text-slate-900">
+                        {idx + 1}. {q.question}
+                      </div>
+                      <ul className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-slate-700">
+                        {(q.choices || []).map((c, i) => (
+                          <li
+                            key={i}
+                            className={cn(
+                              "rounded-xl border border-slate-200/60 bg-white/70 px-3 py-2",
+                              c === q.answer && "border-emerald-200 bg-emerald-50 text-emerald-800"
+                            )}
+                          >
+                            {c}
+                          </li>
+                        ))}
+                      </ul>
+                      {q.explanation && (
+                        <div className="mt-2 text-xs text-slate-600">Explanation: {q.explanation}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
