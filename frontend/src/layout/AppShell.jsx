@@ -62,63 +62,56 @@ export default function AppShell({
         cta={{ label: t.createTest, onClick: () => onNavigate?.("create") }}
       />
 
-      {/* ===== درج السايدبار (للجوال) ===== */}
-      <div
-        className={cn(
-          "fixed inset-0 z-50",
-          drawerOpen ? "pointer-events-auto" : "pointer-events-none"
-        )}
-        aria-hidden={!drawerOpen}
-      >
-        {/* طبقة التعتيم (Overlay) */}
-        <div
-          className={cn(
-            "absolute inset-0 bg-black/30 transition-opacity duration-200",
-            drawerOpen ? "opacity-100" : "opacity-0"
-          )}
-          onClick={() => setDrawerOpen(false)}
-        />
+     {/* ===== درج السايدبار (للجوال) ===== */}
+{drawerOpen && (
+  <div className="fixed inset-0 z-50" aria-hidden={!drawerOpen}>
+    {/* طبقة التعتيم (Overlay) */}
+    <div
+      className="absolute inset-0 bg-black/30"
+      onClick={() => setDrawerOpen(false)}
+    />
 
-        {/* لوحة الدرج */}
-        <div
-          className={cn(
-            "absolute top-0 h-full w-[18rem] sm:w-80 bg-white shadow-2xl",
-            "transition-transform duration-200 ease-out will-change-transform",
-            drawerSide,
-            drawerOpen ? "translate-x-0" : drawerClosedTransform
-          )}
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="h-full flex flex-col">
-            {/* رأس الدرج */}
-            <div className="px-4 py-3 border-b flex items-center justify-between">
-              <div className="font-bold text-slate-900">{t.menu}</div>
-              <button
-                type="button"
-                onClick={() => setDrawerOpen(false)}
-                className="h-9 px-3 rounded-lg border border-slate-200 hover:bg-slate-50"
-              >
-                {t.close}
-              </button>
-            </div>
+    {/* لوحة الدرج */}
+    <div
+      className={cn(
+        "absolute top-0 h-full w-[18rem] sm:w-80 bg-white shadow-2xl",
+        "transition-transform duration-200 ease-out will-change-transform",
+        drawerSide,
+        "translate-x-0"
+      )}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="h-full flex flex-col">
+        {/* رأس الدرج */}
+        <div className="px-4 py-3 border-b flex items-center justify-between">
+          <div className="font-bold text-slate-900">{t.menu}</div>
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(false)}
+            className="h-9 px-3 rounded-lg border border-slate-200 hover:bg-slate-50"
+          >
+            {t.close}
+          </button>
+        </div>
 
-            {/* قائمة السايدبار */}
-            <div className="flex-1 overflow-auto">
-              <Sidebar
-                role={role}
-                active={active}
-                isRtl={isRtl}
-                onNavigate={(k) => {
-                  onNavigate?.(k);
-                  setDrawerOpen(false);
-                }}
-              />
-
-            </div>
-          </div>
+        {/* قائمة السايدبار */}
+        <div className="flex-1 overflow-auto">
+          <Sidebar
+            role={role}
+            active={active}
+            isRtl={isRtl}
+            onNavigate={(k) => {
+              onNavigate?.(k);
+              setDrawerOpen(false);
+            }}
+          />
         </div>
       </div>
+    </div>
+  </div>
+)}
+
 
       {/* ===== محتوى الصفحة ===== */}
       <main className="shell">{children}</main>

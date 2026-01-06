@@ -1,40 +1,38 @@
 import { cn } from "./cn";
 
-export default function Card({
+export default function Button({
   className = "",
   children,
-  variant = "default", // default | glass
+  variant = "default", // default | outline | ghost
+  size = "md",         // md | sm
+  type = "button",
+  disabled = false,
+  ...props
 }) {
+  const base =
+    "inline-flex items-center justify-center rounded-xl font-semibold transition " +
+    "focus:outline-none focus:ring-2 focus:ring-slate-200 " +
+    "disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none";
+
   const variants = {
-    default: "rounded-2xl bg-white shadow-sm border border-slate-100",
-    glass:
-      "rounded-2xl border border-slate-200/60 bg-white/70 backdrop-blur-xl shadow-xl shadow-slate-900/5",
+    default: "bg-slate-900 text-white hover:bg-slate-800",
+    outline: "border border-slate-200/70 bg-white/90 text-slate-900 hover:bg-white",
+    ghost: "bg-transparent text-slate-900 hover:bg-slate-100",
   };
 
-  return <div className={cn(variants[variant], className)}>{children}</div>;
-}
+  const sizes = {
+    md: "h-10 px-4 text-sm",
+    sm: "h-9 px-3 text-sm",
+  };
 
-export function CardHeader({ className = "", children, compact = false }) {
   return (
-    <div
-      className={cn(
-        compact ? "px-5 py-4 border-b border-slate-200/60" : "px-6 pt-6",
-        className
-      )}
+    <button
+      type={type}
+      disabled={disabled}
+      className={cn(base, variants[variant] || variants.default, sizes[size] || sizes.md, className)}
+      {...props}
     >
       {children}
-    </div>
+    </button>
   );
-}
-
-export function CardTitle({ className = "", children }) {
-  return <h3 className={cn("text-slate-900 font-bold", className)}>{children}</h3>;
-}
-
-export function CardDesc({ className = "", children }) {
-  return <p className={cn("text-slate-600 text-sm mt-1", className)}>{children}</p>;
-}
-
-export function CardContent({ className = "", children, compact = false }) {
-  return <div className={cn(compact ? "px-5 py-5" : "px-6 pb-6 pt-4", className)}>{children}</div>;
 }

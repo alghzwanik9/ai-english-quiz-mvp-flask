@@ -12,9 +12,23 @@ import pdfplumber
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
+from dotenv import load_dotenv
+from flask_migrate import Migrate
+from models import db, Test, Question, Choice, AiQuestion
+
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+# ===== PostgreSQL (Neon) =====
+load_dotenv()
+
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+db.init_app(app)
+migrate = Migrate(app, db)
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -63,7 +77,7 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
-def ensure_questions_table():
+def ensure_questions_table():  
     conn = get_db()
     cur = conn.cursor()
     cur.execute("""
@@ -84,7 +98,7 @@ def ensure_questions_table():
     conn.commit()
     conn.close()
 
-ensure_questions_table()
+# ensure_questions_table()
 
 def build_prompt(material: str, topic: str, difficulty: str, n: int):
     return f"""
@@ -112,45 +126,32 @@ STRICT OUTPUT RULES:
 3) choices MUST be exactly 4 items.
 4) answer MUST match one of the 4 choices exactly.
 """
-
 @app.get("/api/ai/questions")
 def list_saved_questions():
     material = (request.args.get("material") or "").strip()
     limit = int(request.args.get("limit") or 50)
     limit = max(1, min(limit, 200))
 
-    conn = get_db()
-    cur = conn.cursor()
-
+    q = AiQuestion.query
     if material:
-        rows = cur.execute(
-            "SELECT id, material, topic, difficulty, qtype, question, choices_json, answer, explanation, source, created_at "
-            "FROM questions WHERE material = ? ORDER BY id DESC LIMIT ?",
-            (material, limit),
-        ).fetchall()
-    else:
-        rows = cur.execute(
-            "SELECT id, material, topic, difficulty, qtype, question, choices_json, answer, explanation, source, created_at "
-            "FROM questions ORDER BY id DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        q = q.filter(AiQuestion.material == material)
 
-    conn.close()
+    rows = q.order_by(AiQuestion.id.desc()).limit(limit).all()
 
     out = []
     for r in rows:
         out.append({
-            "id": r["id"],
-            "material": r["material"],
-            "topic": r["topic"],
-            "difficulty": r["difficulty"],
-            "qtype": r["qtype"],
-            "question": r["question"],
-            "choices": json.loads(r["choices_json"] or "[]"),
-            "answer": r["answer"],
-            "explanation": r["explanation"],
-            "source": r["source"],
-            "created_at": r["created_at"],
+            "id": r.id,
+            "material": r.material,
+            "topic": r.topic,
+            "difficulty": r.difficulty,
+            "qtype": r.qtype,
+            "question": r.question,
+            "choices": json.loads(r.choices_json or "[]"),
+            "answer": r.answer,
+            "explanation": r.explanation,
+            "source": r.source,
+            "created_at": r.created_at,
         })
 
     return jsonify({"ok": True, "items": out})
@@ -256,24 +257,29 @@ def normalize_questions(payload: dict):
     return cleaned
 
 def save_questions(material: str, topic: str, difficulty: str, questions: list, source: str):
-    conn = get_db()
-    cur = conn.cursor()
     now = int(time.time())
     ids = []
+
     for q in questions:
-        cur.execute("""
-        INSERT INTO questions (material, topic, difficulty, qtype, question, choices_json, answer, explanation, source, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            material, topic, difficulty, q["qtype"], q["question"],
-            json.dumps(q["choices"], ensure_ascii=False),
-            q["answer"], q.get("explanation",""),
-            source, now
-        ))
-        ids.append(cur.lastrowid)
-    conn.commit()
-    conn.close()
+        row = AiQuestion(
+            material=material,
+            topic=topic,
+            difficulty=difficulty,
+            qtype=q.get("qtype", "mcq"),
+            question=q["question"],
+            choices_json=json.dumps(q.get("choices", []), ensure_ascii=False),
+            answer=q["answer"],
+            explanation=q.get("explanation", ""),
+            source=source,
+            created_at=now
+        )
+        db.session.add(row)
+        db.session.flush()  # عشان نجيب id
+        ids.append(row.id)
+
+    db.session.commit()
     return ids
+
 
 @app.post("/api/ai/generate-questions")
 
