@@ -4,7 +4,6 @@ import re
 import random
 import time
 import hashlib
-import sqlite3
 from typing import Any, Dict, List, Tuple, Optional
 
 import requests
@@ -24,6 +23,8 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 load_dotenv()
 
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
+if not app.config["SQLALCHEMY_DATABASE_URI"]:
+    raise RuntimeError("DATABASE_URL is required for SQLALCHEMY_DATABASE_URI")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db.init_app(app)
@@ -34,7 +35,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 MATERIALS_FILE = os.path.join(DATA_DIR, "materials.json")
 
-DB_PATH = os.getenv("DB_PATH", "app.db")
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 OLLAMA_URL = os.getenv("OLLAMA_URL", f"{OLLAMA_BASE_URL}/api/generate")
@@ -72,33 +72,6 @@ def _now_iso():
 def _new_id(prefix="mat"):
     raw = f"{prefix}:{time.time()}:{random.random()}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def ensure_questions_table():  
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS questions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        material TEXT NOT NULL,
-        topic TEXT,
-        difficulty TEXT,
-        qtype TEXT NOT NULL,
-        question TEXT NOT NULL,
-        choices_json TEXT,
-        answer TEXT NOT NULL,
-        explanation TEXT,
-        source TEXT NOT NULL,
-        created_at INTEGER NOT NULL
-    )
-    """)
-    conn.commit()
-    conn.close()
-
-# ensure_questions_table()
 
 def build_prompt(material: str, topic: str, difficulty: str, n: int):
     return f"""
@@ -126,6 +99,100 @@ STRICT OUTPUT RULES:
 3) choices MUST be exactly 4 items.
 4) answer MUST match one of the 4 choices exactly.
 """
+
+# ------------------------------------------------------------
+# ✅ NEW: Generate quiz from LESSON TEXT (any subject) - Strict Mode
+# ------------------------------------------------------------
+def build_lesson_prompt(subject: str, lesson_text: str, difficulty: str, n: int) -> str:
+    subject = (subject or "General").strip() or "General"
+    difficulty = (difficulty or "medium").strip().lower()
+    lesson_text = (lesson_text or "").strip()
+
+    return f'''
+You are an educational assistant that generates quiz questions STRICTLY from the provided lesson text.
+
+SUBJECT: {subject}
+DIFFICULTY: {difficulty}
+NUMBER OF QUESTIONS: {n}
+
+STRICT RULES (MUST FOLLOW):
+- Use ONLY information explicitly present in the lesson text below.
+- Do NOT add external knowledge, facts, definitions, dates, names, or examples.
+- Every question MUST be answerable from the lesson text.
+- If the lesson text is insufficient to create {n} good questions, create fewer questions but NEVER invent information.
+
+OUTPUT RULES:
+- Output MUST be valid JSON only (no markdown, no extra text).
+- Output format MUST be exactly:
+{{
+  "questions": [
+    {{
+      "qtype": "mcq",
+      "question": "...",
+      "choices": ["...","...","...","..."],
+      "answer": "...",
+      "explanation": "A short explanation quoting/paraphrasing ONLY from the lesson text"
+    }}
+  ]
+}}
+- choices MUST be exactly 4 items.
+- answer MUST match ONE of the 4 choices exactly.
+
+LESSON TEXT:
+"""
+{lesson_text}
+"""
+'''.strip()
+
+
+@app.post("/api/ai/generate-quiz")
+def ai_generate_quiz_from_text():
+    body = request.get_json(force=True, silent=True) or {}
+
+    subject = (body.get("subject") or body.get("material") or "General").strip()
+    lesson_text = (body.get("text") or body.get("lesson_text") or "").strip()
+    difficulty = (body.get("difficulty") or "medium").strip().lower()
+    count = int(body.get("count") or body.get("num_questions") or 5)
+    count = max(1, min(count, 30))
+
+    # optional: save to DB (default true)
+    save = body.get("save", True)
+    if isinstance(save, str):
+        save = save.strip().lower() not in ("0", "false", "no")
+
+    if not lesson_text:
+        return jsonify({"ok": False, "error": "text (lesson_text) is required"}), 400
+
+    prompt = build_lesson_prompt(subject, lesson_text, difficulty, count)
+
+    used_source = "fallback"
+    try:
+        payload = try_ollama_generate(prompt)
+        questions = normalize_questions(payload)
+        if not questions:
+            raise ValueError("No questions returned")
+        used_source = "ollama"
+    except Exception as e:
+        # fallback (still returns valid schema)
+        questions = normalize_questions(
+            fallback_questions(subject, "From lesson text", difficulty, count)
+        )
+
+    saved_ids = []
+    if save:
+        try:
+            saved_ids = save_questions(subject, "From lesson text", difficulty, questions, used_source)
+        except Exception:
+            # If DB save fails, still return questions
+            saved_ids = []
+
+    return jsonify({
+        "ok": True,
+        "source": used_source,
+        "saved_ids": saved_ids,
+        "questions": questions
+    })
+
 @app.get("/api/ai/questions")
 def list_saved_questions():
     material = (request.args.get("material") or "").strip()
