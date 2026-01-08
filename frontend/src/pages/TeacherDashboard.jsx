@@ -1,7 +1,9 @@
-import { useMemo, useRef, useState } from "react";
+
 import Card, { CardContent, CardDesc, CardHeader, CardTitle } from "../ui/Card";
 import Button from "../ui/Button";
 import { cn } from "../ui/cn";
+import { useMemo, useRef, useState, useEffect } from "react";
+import { getTests, setTests as saveTests, addTest as addTestToStore } from "../lib/storage";
 
 function MiniIcon({ type = "spark" }) {
   const cls = "h-4 w-4";
@@ -97,6 +99,13 @@ function StatCard({ label, value, icon, trend }) {
 
           <div className="flex items-center gap-2">
             <Trend value={trend} />
+          {onResults && (
+  <Button variant="outline" size="sm" onClick={onResults}>
+    Results
+  </Button>
+)}
+
+
             <div className="grid place-items-center h-9 w-9 rounded-xl border border-slate-200/60 bg-white/70 text-slate-700">
               <MiniIcon type={icon} />
             </div>
@@ -248,7 +257,10 @@ export default function TeacherDashboard({ go }) {
   const confirmSaveTest = () => {
     if (!pendingTest) return;
 
-    setTests((prev) => [pendingTest, ...prev]);
+    const next = [pendingTest, ...tests];
+setTests(next);
+saveTests(next);
+
 
     setConfirmOpen(false);
     setPendingTest(null);

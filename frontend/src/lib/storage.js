@@ -1,77 +1,134 @@
-const KEY_USERS = "aiq_users_v1";
-const KEY_SESSION = "aiq_session_v1";
-const KEY_TESTS = "aiq_tests_v1";
+// src/lib/storage.js
+// Storage layer ثابت + آمن (ما يطيّح التطبيق لو البيانات قديمة/خربانة)
 
-export function seedIfEmpty() {
-  const users = JSON.parse(localStorage.getItem(KEY_USERS) || "[]");
-  if (users.length) return;
+const KEYS = {
+  TESTS: "tests",
+  RESULTS: "results",
+  SESSION: "session_user",
+};
 
-  const seed = [
-    { id: 1, name: "Teacher", email: "teacher@test.com", password: "1234", role: "teacher" },
-    { id: 2, name: "Student", email: "student@test.com", password: "1234", role: "student" },
-  ];
-  localStorage.setItem(KEY_USERS, JSON.stringify(seed));
-  localStorage.setItem(KEY_TESTS, JSON.stringify([]));
+// ---------- helpers ----------
+function safeParse(raw, fallback) {
+  try {
+    if (raw == null) return fallback;
+    const v = JSON.parse(raw);
+    return v ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function read(key, fallback) {
+  return safeParse(localStorage.getItem(key), fallback);
+}
+
+function write(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function ensureArray(v) {
+  return Array.isArray(v) ? v : [];
+}
+
+// ---------- session ----------
+export function setSessionUser(user) {
+  write(KEYS.SESSION, user || null);
 }
 
 export function getSessionUser() {
-  try { return JSON.parse(localStorage.getItem(KEY_SESSION) || "null"); }
-  catch { return null; }
+  return read(KEYS.SESSION, null);
 }
 
-export function logout() {
-  localStorage.removeItem(KEY_SESSION);
+export function clearSessionUser() {
+  localStorage.removeItem(KEYS.SESSION);
 }
 
-export function login(email, password) {
-  const users = JSON.parse(localStorage.getItem(KEY_USERS) || "[]");
-  const u = users.find(x => (x.email || "").toLowerCase() === String(email).toLowerCase() && x.password === String(password));
-  if (!u) return null;
-  const session = { id: u.id, name: u.name, email: u.email, role: u.role };
-  localStorage.setItem(KEY_SESSION, JSON.stringify(session));
-  return session;
-}
-
-export function registerUser({ name, email, password, role }) {
-  const users = JSON.parse(localStorage.getItem(KEY_USERS) || "[]");
-  if (users.some(u => (u.email || "").toLowerCase() === String(email).toLowerCase())) {
-    return { ok: false, message: "Email already exists" };
-  }
-  const id = Date.now();
-  const u = { id, name, email, password, role };
-  users.push(u);
-  localStorage.setItem(KEY_USERS, JSON.stringify(users));
-  return { ok: true };
-}
-
-/* Tests CRUD */
+// ---------- tests ----------
 export function getTests() {
-  try { return JSON.parse(localStorage.getItem(KEY_TESTS) || "[]"); }
-  catch { return []; }
+  return ensureArray(read(KEYS.TESTS, []));
 }
 
-export function saveTests(tests) {
-  localStorage.setItem(KEY_TESTS, JSON.stringify(Array.isArray(tests) ? tests : []));
+export function setTests(tests) {
+  write(KEYS.TESTS, ensureArray(tests));
 }
 
-export function nextTestId() {
-  return Date.now();
+export function addTest(test) {
+  const list = getTests();
+  list.unshift(test);
+  setTests(list);
+  return test;
 }
-
 export function upsertTest(test) {
-  const tests = getTests();
-  const idx = tests.findIndex(t => Number(t.id) === Number(test.id));
-  if (idx >= 0) tests[idx] = test;
-  else tests.unshift(test);
-  saveTests(tests);
+  const list = getTests();
+  const id = Number(test?.id);
+
+  // إذا ما فيه id → اعتبره إضافة جديدة
+  if (!Number.isFinite(id) || id === 0) {
+    const t = { ...test, id: Date.now() };
+    list.unshift(t);
+    setTests(list);
+    return t;
+  }
+
+  // إذا موجود → تحديث، إذا غير موجود → إضافة
+  const idx = list.findIndex((t) => Number(t.id) === id);
+  if (idx >= 0) {
+    list[idx] = { ...list[idx], ...test };
+  } else {
+    list.unshift(test);
+  }
+  setTests(list);
+  return test;
 }
 
-export function deleteTest(id) {
-  const tests = getTests().filter(t => Number(t.id) !== Number(id));
-  saveTests(tests);
+export function updateTest(testId, patch) {
+  const list = getTests();
+  const id = Number(testId);
+  const next = list.map((t) => (Number(t.id) === id ? { ...t, ...patch } : t));
+  setTests(next);
+  return next.find((t) => Number(t.id) === id) || null;
 }
 
-export function nextQuestionId(test) {
-  const maxId = Math.max(0, ...(test.questions || []).map(q => Number(q.id) || 0));
-  return maxId + 1;
+export function deleteTest(testId) {
+  const id = Number(testId);
+  const next = getTests().filter((t) => Number(t.id) !== id);
+  setTests(next);
+  return next;
 }
+
+export function getTestById(testId) {
+  const id = Number(testId);
+  return getTests().find((t) => Number(t.id) === id) || null;
+}
+
+// ---------- results ----------
+export function getResults() {
+  // نخليها دايم Array حتى لو البيانات قديمة
+  return ensureArray(read(KEYS.RESULTS, []));
+}
+
+export function setResults(results) {
+  write(KEYS.RESULTS, ensureArray(results));
+}
+
+export function addResult(result) {
+  const list = getResults();
+  list.unshift(result);
+  setResults(list);
+  return result;
+}
+
+export function clearResults() {
+  localStorage.removeItem(KEYS.RESULTS);
+}
+
+// أدوات مساعدة (اختياري)
+export function getResultsByTestId(testId) {
+  const id = Number(testId);
+  return getResults().filter((r) => Number(r.testId) === id);
+}
+
+export const getAttempts = getResults;
+export const setAttempts = setResults;
+export const addAttempt = addResult;
+export const clearAttempts = clearResults;

@@ -1,6 +1,5 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import AuthNavbar from "../components/AuthNavbar";
 import { getSessionUser } from "../lib/storage";
 import { Card, Button } from "../components/ui";
 
@@ -9,7 +8,7 @@ export default function Home() {
 
   return (
     <>
-      <AuthNavbar />
+      
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <Card title="Welcome">
           <div className="muted">

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import Card, { CardContent, CardDesc, CardHeader, CardTitle } from "../ui/Card.jsx";
 import Button from "../ui/Button.jsx";
 import { cn } from "../ui/cn";
+import { addTest, updateTest } from "../lib/storage";
 
 function TabButton({ active, children, onClick }) {
   return (
@@ -19,21 +20,29 @@ function TabButton({ active, children, onClick }) {
   );
 }
 
-function Field({ label, placeholder, type = "text", hint }) {
+function Field({ label, placeholder, type = "text", hint, value, onChange }) {
   return (
     <label className="block">
       <div className="text-sm font-semibold text-slate-800 mb-1">{label}</div>
-      <input type={type} placeholder={placeholder} className="inputx" />
+      <input
+        type={type}
+        placeholder={placeholder}
+        className="inputx"
+        value={value ?? ""}
+        onChange={onChange}
+      />
       {hint ? <div className="text-xs text-slate-500 mt-1">{hint}</div> : null}
     </label>
   );
 }
 
-function Select({ label, children, hint }) {
+function Select({ label, children, hint, value, onChange }) {
   return (
     <label className="block">
       <div className="text-sm font-semibold text-slate-800 mb-1">{label}</div>
-      <select className="selectx">{children}</select>
+      <select className="selectx" value={value ?? ""} onChange={onChange}>
+        {children}
+      </select>
       {hint ? <div className="text-xs text-slate-500 mt-1">{hint}</div> : null}
     </label>
   );
@@ -65,12 +74,150 @@ function MiniRow({ label, value }) {
 export default function CreateTest() {
   const [tab, setTab] = useState("info"); // info | manual | import | ai
 
+  const [testId, setTestId] = useState(null);
+  const [testName, setTestName] = useState("");
+  const [material, setMaterial] = useState("");
+  const [numQuestions, setNumQuestions] = useState(10);
+  const [difficulty, setDifficulty] = useState("Easy");
+  const [language, setLanguage] = useState("EN");
+  const [questionType, setQuestionType] = useState("MCQ");
+
+  // settings
+  const [timeLimitMin, setTimeLimitMin] = useState(0);
+  const [passScore, setPassScore] = useState(60);
+
+  // manual question inputs
+  const [questions, setQuestions] = useState([]);
+  const [qText, setQText] = useState("");
+  const [optA, setOptA] = useState("");
+  const [optB, setOptB] = useState("");
+  const [optC, setOptC] = useState("");
+  const [optD, setOptD] = useState("");
+  const [correct, setCorrect] = useState("A");
+  const [explain, setExplain] = useState("");
+
+  const [saveMsg, setSaveMsg] = useState("");
+
   const title = useMemo(() => {
     if (tab === "info") return "Test Information";
     if (tab === "manual") return "Add Questions Manually";
     if (tab === "import") return "Import PDF / CSV";
     return "Generate with AI";
   }, [tab]);
+
+  const safePass = Math.min(100, Math.max(0, Number(passScore) || 0));
+  const safeMin = Math.max(0, Number(timeLimitMin) || 0);
+
+  const buildTestObject = (idOverride = null) => {
+    const id = idOverride ?? testId ?? Date.now();
+    return {
+      id,
+      name: String(testName || "").trim(),
+      material: String(material || "").trim(),
+      difficulty,
+      language,
+      questionType,
+      questions: Array.isArray(questions) ? questions : [],
+      timeLimitSec: safeMin * 60,
+      passScore: safePass,
+      updatedAt: Date.now(),
+      createdAt: Date.now(),
+    };
+  };
+
+  const onSave = (goManualAfter = false) => {
+    const name = String(testName || "").trim();
+    if (!name) {
+      setSaveMsg("Please enter Test Name.");
+      setTab("info");
+      return;
+    }
+
+    const t = buildTestObject();
+    upsertTest(t);
+    setTestId(t.id);
+    setSaveMsg("Saved ✅");
+    if (goManualAfter) setTab("manual");
+  };
+
+  const clearManual = () => {
+    setQText("");
+    setOptA("");
+    setOptB("");
+    setOptC("");
+    setOptD("");
+    setCorrect("A");
+    setExplain("");
+  };
+
+  const addQuestion = () => {
+    const qt = String(qText || "").trim();
+    if (!qt) return setSaveMsg("Write Question Text first.");
+
+    const choices = [optA, optB, optC, optD].map((x) => String(x || "").trim());
+    const filled = choices.filter((c) => c.length > 0);
+
+    if (filled.length < 2) return setSaveMsg("Add at least 2 options.");
+    if (!choices[0] || !choices[1]) return setSaveMsg("Option A and B are required.");
+
+    const map = { A: 0, B: 1, C: 2, D: 3 };
+    const correctIndex = map[correct] ?? 0;
+    if (!choices[correctIndex]) return setSaveMsg("Correct option is empty.");
+
+    const q = {
+      id: Date.now(),
+      type: "mcq",
+      question: qt,
+      choices,
+      correctIndex,
+      explanation: String(explain || "").trim(),
+    };
+
+    const next = [q, ...(Array.isArray(questions) ? questions : [])];
+    setQuestions(next);
+    setSaveMsg("Question added ✅");
+
+    // auto-save if test has name
+    const name = String(testName || "").trim();
+    if (name) {
+      const id = testId ?? Date.now();
+      setTestId(id);
+      const t = buildTestObject(id);
+      t.questions = next;
+      upsertTest(t);
+    }
+
+    clearManual();
+  };
+
+  const removeQuestion = (qid) => {
+    const next = (Array.isArray(questions) ? questions : []).filter((q) => String(q.id) !== String(qid));
+    setQuestions(next);
+
+    const name = String(testName || "").trim();
+    if (name && testId) {
+      const t = buildTestObject(testId);
+      t.questions = next;
+      upsertTest(t);
+      setSaveMsg("Question removed ✅");
+    }
+  };
+
+  const onCancel = () => {
+    setTestId(null);
+    setTestName("");
+    setMaterial("");
+    setNumQuestions(10);
+    setDifficulty("Easy");
+    setLanguage("EN");
+    setQuestionType("MCQ");
+    setTimeLimitMin(0);
+    setPassScore(60);
+    setQuestions([]);
+    clearManual();
+    setSaveMsg("");
+    setTab("info");
+  };
 
   return (
     <div className="space-y-6">
@@ -103,7 +250,7 @@ export default function CreateTest() {
               ) : tab === "import" ? (
                 <Button size="sm" variant="outline">Upload</Button>
               ) : (
-                <Button size="sm" variant="outline">Preview</Button>
+                <Button size="sm" variant="outline" onClick={() => onSave(true)}>Preview</Button>
               )}
             </div>
           </CardHeader>
@@ -111,53 +258,73 @@ export default function CreateTest() {
           <CardContent compact className="space-y-4">
             {tab === "info" && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field label="Test Name" placeholder="e.g., Grammar Basics" />
-                <Field label="Material / Subject" placeholder="e.g., Grammar" />
-                <Field label="Number of Questions" placeholder="e.g., 10" type="number" />
-                <Select label="Difficulty">
-                  <option>Easy</option>
-                  <option>Medium</option>
-                  <option>Hard</option>
+                <Field label="Test Name" placeholder="e.g., Grammar Basics" value={testName} onChange={(e) => setTestName(e.target.value)} />
+                <Field label="Material / Subject" placeholder="e.g., Grammar" value={material} onChange={(e) => setMaterial(e.target.value)} />
+                <Field label="Number of Questions" placeholder="e.g., 10" type="number" value={numQuestions} onChange={(e) => setNumQuestions(Number(e.target.value || 0))} />
+
+                {/* settings */}
+                <Field label="Time Limit (minutes)" placeholder="0 = No time limit" type="number" value={timeLimitMin} onChange={(e) => setTimeLimitMin(Number(e.target.value || 0))} />
+                <Field label="Passing Score (%)" placeholder="e.g., 60" type="number" hint="0–100" value={passScore} onChange={(e) => setPassScore(Number(e.target.value || 0))} />
+
+                <Select label="Difficulty" value={difficulty} onChange={(e) => setDifficulty(e.target.value)}>
+                  <option>Easy</option><option>Medium</option><option>Hard</option>
                 </Select>
-                <Select label="Language" hint="Used for instructions & UI hints.">
-                  <option>EN</option>
-                  <option>AR</option>
-                  <option>EN + AR</option>
+
+                <Select label="Language" hint="Used for instructions & UI hints." value={language} onChange={(e) => setLanguage(e.target.value)}>
+                  <option>EN</option><option>AR</option><option>EN + AR</option>
                 </Select>
-                <Select label="Question Type">
-                  <option>MCQ</option>
-                  <option>True / False</option>
-                  <option>Mixed</option>
+
+                <Select label="Question Type" value={questionType} onChange={(e) => setQuestionType(e.target.value)}>
+                  <option>MCQ</option><option>True / False</option><option>Mixed</option>
                 </Select>
               </div>
             )}
 
             {tab === "manual" && (
               <div className="space-y-4">
-                <Field label="Question Text" placeholder="Write the question..." />
+                <Field label="Question Text" placeholder="Write the question..." value={qText} onChange={(e) => setQText(e.target.value)} />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Field label="Option A" placeholder="A..." />
-                  <Field label="Option B" placeholder="B..." />
-                  <Field label="Option C" placeholder="C..." />
-                  <Field label="Option D" placeholder="D..." />
+                  <Field label="Option A" placeholder="A..." value={optA} onChange={(e) => setOptA(e.target.value)} />
+                  <Field label="Option B" placeholder="B..." value={optB} onChange={(e) => setOptB(e.target.value)} />
+                  <Field label="Option C" placeholder="C..." value={optC} onChange={(e) => setOptC(e.target.value)} />
+                  <Field label="Option D" placeholder="D..." value={optD} onChange={(e) => setOptD(e.target.value)} />
                 </div>
 
-                <Select label="Correct Answer">
-                  <option>A</option>
-                  <option>B</option>
-                  <option>C</option>
-                  <option>D</option>
+                <Select label="Correct Answer" value={correct} onChange={(e) => setCorrect(e.target.value)}>
+                  <option>A</option><option>B</option><option>C</option><option>D</option>
                 </Select>
 
-                <Field label="Explanation (optional)" placeholder="Short explanation..." />
+                <Field label="Explanation (optional)" placeholder="Short explanation..." value={explain} onChange={(e) => setExplain(e.target.value)} />
+
                 <div className="flex flex-wrap gap-2">
-                  <Button>Add Question</Button>
-                  <Button variant="outline">Clear</Button>
+                  <Button onClick={addQuestion}>Add Question</Button>
+                  <Button variant="outline" onClick={clearManual}>Clear</Button>
+                  <Button variant="outline" onClick={() => onSave(false)}>Save Draft</Button>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200/60 bg-white/60 p-4 text-sm text-slate-600">
-                  Tip: Keep questions short and avoid ambiguous options.
-                </div>
+                {questions.length ? (
+                  <div className="space-y-2">
+                    <div className="text-sm font-bold text-slate-900">Questions Preview</div>
+                    {questions.slice(0, 6).map((q) => (
+                      <div key={q.id} className="rounded-2xl border border-slate-200/60 bg-white/60 p-3 text-sm">
+                        <div className="font-semibold text-slate-900">{q.question}</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          Correct: {["A", "B", "C", "D"][Number(q.correctIndex) || 0]}
+                        </div>
+                        <div className="mt-2">
+                          <button className="text-xs font-bold text-rose-700 hover:underline" onClick={() => removeQuestion(q.id)}>
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {questions.length > 6 ? <div className="text-xs text-slate-500">+ {questions.length - 6} more…</div> : null}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-slate-200/60 bg-white/60 p-4 text-sm text-slate-600">
+                    Tip: Add questions here. Save Draft anytime.
+                  </div>
+                )}
               </div>
             )}
 
@@ -173,13 +340,11 @@ export default function CreateTest() {
 
             {tab === "ai" && (
               <div className="space-y-4">
-                <Field label="Topic" placeholder="e.g., Past Tense / Travel Vocabulary" />
+                <Field label="Topic" placeholder="e.g., Past Tense / Travel Vocabulary" value={""} onChange={() => {}} />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Field label="Questions Count" placeholder="e.g., 10" type="number" />
-                  <Select label="Generation Style">
-                    <option>Balanced</option>
-                    <option>Simple</option>
-                    <option>Challenging</option>
+                  <Field label="Questions Count" placeholder="e.g., 10" type="number" value={""} onChange={() => {}} />
+                  <Select label="Generation Style" value={"Balanced"} onChange={() => {}}>
+                    <option>Balanced</option><option>Simple</option><option>Challenging</option>
                   </Select>
                 </div>
 
@@ -203,16 +368,19 @@ export default function CreateTest() {
           </CardHeader>
 
           <CardContent compact className="space-y-3">
-            <MiniRow label="Status" value="Draft" />
-            <MiniRow label="Questions" value="0" />
-            <MiniRow label="Language" value="EN/AR" />
+            <MiniRow label="Status" value={testId ? "Draft (Saved)" : "Draft"} />
+            <MiniRow label="Questions" value={String(questions.length)} />
+            <MiniRow label="Language" value={language} />
             <MiniRow label="Mode" value={tab.toUpperCase()} />
+            <MiniRow label="Time" value={Number(timeLimitMin) ? `${timeLimitMin} min` : "No limit"} />
+            <MiniRow label="Pass" value={`${safePass}%`} />
 
             <div className="pt-2 grid grid-cols-1 gap-2">
-           <Button className="w-full">Save Test</Button>
-           <Button className="w-full" variant="outline">Cancel</Button>
-         </div>
+              <Button className="w-full" onClick={() => onSave(false)}>Save Test</Button>
+              <Button className="w-full" variant="outline" onClick={onCancel}>Cancel</Button>
+            </div>
 
+            {saveMsg ? <div className="text-xs font-semibold text-slate-700 pt-1">{saveMsg}</div> : null}
 
             <div className="text-xs text-slate-500 pt-2">
               Save will store the draft locally for now (DB later).

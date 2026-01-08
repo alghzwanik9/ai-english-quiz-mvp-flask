@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from "react";
-import AuthNavbar from "../components/AuthNavbar";
-import { Card, Button, Select } from "../components/ui";
-import { getTests, addAttempt, getAttempts } from "../lib/storage";
+import { Card, Button, Select } from "../ui";
+import { getTests, getAttempts, addAttempt } from "../lib/storage";
 
 function safeArr(v) {
   return Array.isArray(v) ? v : [];
@@ -38,13 +37,7 @@ export default function StudentDashboard() {
       const val = a === "true" ? true : a === "false" ? false : null;
       return val !== null && val === Boolean(q.answer);
     }
-    if (t === "fill") {
-      return (
-        String(a || "").trim().toLowerCase() ===
-        String(q.answer || "").trim().toLowerCase()
-      );
-    }
-    if (t === "reorder") {
+    if (t === "fill" || t === "reorder") {
       return (
         String(a || "").trim().toLowerCase() ===
         String(q.answer || "").trim().toLowerCase()
@@ -61,10 +54,12 @@ export default function StudentDashboard() {
     for (const q of qs) if (gradeQuestion(q)) score++;
 
     const res = {
+      id: Date.now(),
       testId: selectedTest.id,
       testName: selectedTest.name,
       total: qs.length,
       score,
+      percent: qs.length ? Math.round((score / qs.length) * 100) : 0,
       createdAt: Date.now(),
     };
 
@@ -77,6 +72,7 @@ export default function StudentDashboard() {
     setResult(null);
   };
 
+  // يعيد القراءة كل ما تتغير النتيجة (عشان يظهر آخر Attempt)
   const attempts = useMemo(() => getAttempts(), [result]);
 
   const renderQ = (q) => {
@@ -143,9 +139,7 @@ export default function StudentDashboard() {
             <div className="mt-3">
               <input
                 className="inputx"
-                placeholder={
-                  t === "fill" ? "Type the answer..." : "Type the correct order..."
-                }
+                placeholder={t === "fill" ? "Type the answer..." : "Type the correct order..."}
                 value={answers[q.id] ?? ""}
                 onChange={(e) => onChangeAnswer(q.id, e.target.value)}
               />
@@ -158,8 +152,7 @@ export default function StudentDashboard() {
 
   return (
     <>
-      <AuthNavbar />
-
+  
 
       <div className="mt-6 space-y-4">
         <div className="flex items-end justify-between flex-wrap gap-3">
@@ -195,7 +188,7 @@ export default function StudentDashboard() {
             {result ? (
               <Card title="Result">
                 <div className="text-slate-900 font-semibold">
-                  Score: {result.score} / {result.total}
+                  Score: {result.score} / {result.total} ({result.percent}%)
                 </div>
                 <div className="muted mt-1">{result.testName}</div>
                 <div className="mt-3 flex gap-2">
@@ -225,13 +218,11 @@ export default function StudentDashboard() {
               ) : (
                 <div className="space-y-2">
                   {attempts.slice(0, 10).map((a, i) => (
-                    <div key={i} className="rounded-xl border border-slate-200 bg-white p-3">
+                    <div key={a.id ?? i} className="rounded-xl border border-slate-200 bg-white p-3">
                       <div className="font-semibold text-slate-900">
-                        {a.testName} — {a.score}/{a.total}
+                        {a.testName} — {a.score}/{a.total} ({a.percent ?? 0}%)
                       </div>
-                      <div className="muted">
-                        {new Date(a.createdAt).toLocaleString()}
-                      </div>
+                      <div className="muted">{new Date(a.createdAt).toLocaleString()}</div>
                     </div>
                   ))}
                 </div>

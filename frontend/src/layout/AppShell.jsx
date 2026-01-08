@@ -3,14 +3,19 @@ import Sidebar from "./Sidebar";
 import Header from "./Header";
 import { cn } from "../ui/cn";
 import { STRINGS } from "../i18n/strings";
+import { clearSessionUser } from "../lib/storage";
 
 export default function AppShell({
   title,
   role = "teacher",
   active,
   onNavigate,
+  navItems = [],
+  onSwitchRole,
   children,
 }) {
+
+  
   // ===== حالات الواجهة (State) =====
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [lang, setLang] = useState(() => localStorage.getItem("lang") || "en");
@@ -58,9 +63,22 @@ export default function AppShell({
         onToggleLang={() => setLang((p) => (p === "ar" ? "en" : "ar"))}
         onOpenMobileMenu={() => setDrawerOpen(true)}
         user={{ name: role === "teacher" ? t.teacher : t.student }}
-        onLogout={() => alert("Logout")}
-        cta={{ label: t.createTest, onClick: () => onNavigate?.("create") }}
-      />
+       onLogout={() => {
+    clearSessionUser();
+    window.location.reload();
+  }}
+/>
+{onSwitchRole && (
+  <div className="shell pt-3">
+    <button
+      type="button"
+      onClick={() => onSwitchRole(role === "teacher" ? "student" : "teacher")}
+      className="h-9 px-3 rounded-lg border border-slate-200 hover:bg-slate-50"
+    >
+      Switch to {role === "teacher" ? "Student" : "Teacher"}
+    </button>
+  </div>
+)}
 
      {/* ===== درج السايدبار (للجوال) ===== */}
 {drawerOpen && (
@@ -97,15 +115,17 @@ export default function AppShell({
 
         {/* قائمة السايدبار */}
         <div className="flex-1 overflow-auto">
-          <Sidebar
-            role={role}
-            active={active}
-            isRtl={isRtl}
-            onNavigate={(k) => {
-              onNavigate?.(k);
-              setDrawerOpen(false);
-            }}
-          />
+         <Sidebar
+        role={role}
+        active={active}
+        isRtl={isRtl}
+        items={navItems}
+        onNavigate={(k) => {
+          onNavigate?.(k);
+          setDrawerOpen(false);
+        }}
+        />
+
         </div>
       </div>
     </div>

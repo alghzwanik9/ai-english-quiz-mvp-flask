@@ -77,12 +77,44 @@ function Icon({ name, className = "" }) {
           />
         </svg>
       );
+
+    // ✅ أيقونات إضافية لصفحات الطالب/النتائج
+    case "tests":
+      return (
+        <svg className={cn(base, className)} viewBox="0 0 24 24" fill="none">
+          <path d="M7 4h10v16H7V4Z" stroke="currentColor" strokeWidth="1.8" />
+          <path
+            d="M9 8h6M9 12h6M9 16h4"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
+        </svg>
+      );
+    case "spark":
+      return (
+        <svg className={cn(base, className)} viewBox="0 0 24 24" fill="none">
+          <path
+            d="M12 2l1.2 4.2L17.4 8 13.2 9.2 12 13.4 10.8 9.2 6.6 8l4.2-1.8L12 2Z"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M19 13l.8 2.8 2.8.8-2.8.8L19 20l-.8-2.8-2.8-.8 2.8-.8L19 13Z"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+
     default:
       return null;
   }
 }
 
-const teacherNav = [
+const teacherNavFallback = [
   { key: "dashboard", label: "Dashboard", icon: "dashboard" },
   { key: "create", label: "Create Test", icon: "create" },
   { key: "bank", label: "Question Bank", icon: "bank" },
@@ -95,8 +127,10 @@ export default function Sidebar({
   active = "dashboard",
   onNavigate,
   isRtl = false,
+  items,
 }) {
-  const items = role === "teacher" ? teacherNav : teacherNav;
+  // ✅ لو AppShell مرّر items نستخدمها، وإلا نرجع للفولباك
+  const nav = Array.isArray(items) && items.length > 0 ? items : teacherNavFallback;
 
   return (
     <aside className="h-full w-72">
@@ -121,7 +155,7 @@ export default function Sidebar({
 
         {/* روابط التنقل */}
         <nav className="px-3 pb-5 space-y-1">
-          {items.map((it) => {
+          {nav.map((it) => {
             const isActive = it.key === active;
             return (
               <button
