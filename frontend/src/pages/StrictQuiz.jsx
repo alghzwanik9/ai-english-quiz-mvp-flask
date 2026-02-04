@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { getToken, logout } from "../services/authService";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:5000";
 
@@ -7,6 +9,8 @@ function cls(...x) {
 }
 
 export default function StrictQuiz({ onBack }) {
+  const nav = useNavigate();
+
   const [subject, setSubject] = useState("General");
   const [text, setText] = useState("");
   const [count, setCount] = useState(5);
@@ -17,7 +21,10 @@ export default function StrictQuiz({ onBack }) {
   const [err, setErr] = useState("");
   const [result, setResult] = useState(null);
 
-  const canSubmit = useMemo(() => text.trim().length >= 20 && Number(count) > 0, [text, count]);
+  const canSubmit = useMemo(
+    () => text.trim().length >= 20 && Number(count) > 0,
+    [text, count]
+  );
 
   const generate = async () => {
     setErr("");
@@ -25,21 +32,30 @@ export default function StrictQuiz({ onBack }) {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_BASE}/api/ai/generate-quiz`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject,
-          text,
-          count: Number(count),
-          difficulty,
-          save,
-        }),
-      });
+   const token = getToken();
+
+const res = await fetch(`${API_BASE}/api/ai/generate-quiz`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  },
+  body: JSON.stringify({ subject, text, count: Number(count), difficulty, save }),
+});
+
+
+      // لو التوكن منتهي/غير صحيح
+      if (res.status === 401) {
+        logout();
+        nav("/login", { replace: true });
+        return;
+      }
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data?.error || data?.message || `Request failed (${res.status})`);
+        throw new Error(
+          data?.error || data?.message || `Request failed (${res.status})`
+        );
       }
 
       setResult(data);
@@ -98,7 +114,9 @@ export default function StrictQuiz({ onBack }) {
         {/* Controls */}
         <div className="grid grid-cols-1 gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-12">
           <div className="md:col-span-4">
-            <label className="mb-1 block text-xs font-medium text-slate-600">Subject</label>
+            <label className="mb-1 block text-xs font-medium text-slate-600">
+              Subject
+            </label>
             <input
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
@@ -108,7 +126,9 @@ export default function StrictQuiz({ onBack }) {
           </div>
 
           <div className="md:col-span-2">
-            <label className="mb-1 block text-xs font-medium text-slate-600">Questions</label>
+            <label className="mb-1 block text-xs font-medium text-slate-600">
+              Questions
+            </label>
             <input
               type="number"
               min="1"
@@ -120,7 +140,9 @@ export default function StrictQuiz({ onBack }) {
           </div>
 
           <div className="md:col-span-3">
-            <label className="mb-1 block text-xs font-medium text-slate-600">Difficulty</label>
+            <label className="mb-1 block text-xs font-medium text-slate-600">
+              Difficulty
+            </label>
             <select
               value={difficulty}
               onChange={(e) => setDifficulty(e.target.value)}
@@ -145,7 +167,9 @@ export default function StrictQuiz({ onBack }) {
           </div>
 
           <div className="md:col-span-12">
-            <label className="mb-1 block text-xs font-medium text-slate-600">Lesson text</label>
+            <label className="mb-1 block text-xs font-medium text-slate-600">
+              Lesson text
+            </label>
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
@@ -182,7 +206,10 @@ export default function StrictQuiz({ onBack }) {
 
             <div className="grid grid-cols-1 gap-4">
               {(result.questions || []).map((q, idx) => (
-                <div key={idx} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div
+                  key={idx}
+                  className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-xs text-slate-500">Q{idx + 1}</div>

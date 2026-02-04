@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getAttempts, getTests } from "../lib/storage";
 import Card, { CardContent, CardDesc, CardHeader, CardTitle } from "../ui/Card.jsx";
 import Button from "../ui/Button.jsx";
@@ -50,6 +50,8 @@ function Badge({ ok, children }) {
   );
 }
 
+
+
 export default function TeacherResults({ onBack }) {
   const tests = useMemo(() => safeArr(getTests?.() || []), []);
   const attemptsRaw = useMemo(() => safeArr(getAttempts?.() || []), []);
@@ -62,6 +64,34 @@ export default function TeacherResults({ onBack }) {
       filterTestId === "all"
         ? attempts
         : attempts.filter((a) => String(a?.testId) === String(filterTestId));
+
+        useEffect(() => {
+  const refresh = () => {
+    setTests(safeArr(getTests?.() || []));
+    setAttemptsRaw(safeArr(getAttempts?.() || []));
+  };
+
+  // تحديث عند فتح الصفحة
+  refresh();
+
+  // تحديث عند التخزين (لو عندك event مخصص)
+  const onCustom = (e) => {
+    const key = e?.detail?.key;
+    if (!key || key === "tests" || key === "results") refresh();
+  };
+  window.addEventListener("storage_updated", onCustom);
+
+  // تحديث لو صار تغيير من تبويب ثاني
+  const onNative = (e) => {
+    if (!e?.key || e.key === "tests" || e.key === "results") refresh();
+  };
+  window.addEventListener("storage", onNative);
+
+  return () => {
+    window.removeEventListener("storage_updated", onCustom);
+    window.removeEventListener("storage", onNative);
+  };
+}, []);
 
     // ✅ الأحدث أولاً
     return [...list].sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));

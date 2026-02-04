@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getAttempts } from "../lib/storage";
 import Card, { CardContent, CardDesc, CardHeader, CardTitle } from "../ui/Card.jsx";
 import Button from "../ui/Button.jsx";
@@ -25,10 +25,36 @@ function Badge({ ok, children }) {
 }
 
 export default function StudentResults({ onBack }) {
-  const attempts = useMemo(() => {
+  const [attempts, setAttempts] = useState(() => {
+  const a = getAttempts?.() || [];
+  return Array.isArray(a) ? a : [];
+});
+
+useEffect(() => {
+  const refresh = () => {
     const a = getAttempts?.() || [];
-    return Array.isArray(a) ? a : [];
-  }, []);
+    setAttempts(Array.isArray(a) ? a : []);
+  };
+
+  refresh();
+
+  const onCustom = (e) => {
+    const key = e?.detail?.key;
+    if (!key || key === "results") refresh();
+  };
+  window.addEventListener("storage_updated", onCustom);
+
+  const onNative = (e) => {
+    if (!e?.key || e.key === "results") refresh();
+  };
+  window.addEventListener("storage", onNative);
+
+  return () => {
+    window.removeEventListener("storage_updated", onCustom);
+    window.removeEventListener("storage", onNative);
+  };
+}, []);
+
 
   const total = attempts.length;
   const passed = attempts.filter((x) => x?.passed).length;

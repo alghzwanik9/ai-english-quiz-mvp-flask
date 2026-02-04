@@ -41,26 +41,30 @@ export default function TakeQuiz({ testId, onBack, onFinish }) {
 
   // عداد تنازلي
   useEffect(() => {
-    if (!test) return;
-    if (!timeLimitSec) return;
-    if (result) return; // وقف بعد الإنهاء
+  if (!test) return;
+  if (!timeLimitSec) return;
+  if (result) return; // وقف بعد الإنهاء
 
-    const t = setInterval(() => {
-      setTimeLeft((prev) => {
-        const next = prev - 1;
-        return next;
-      });
-    }, 1000);
+  const t = setInterval(() => {
+    setTimeLeft((prev) => {
+      const next = prev - 1;
+      return next <= 0 ? 0 : next;
+    });
+  }, 1000);
 
-    return () => clearInterval(t);
-  }, [test, timeLimitSec, result]);
+  return () => clearInterval(t);
+}, [test, timeLimitSec, result]);
+
 
   // انتهى الوقت → submit تلقائي
   useEffect(() => {
     if (!timeLimitSec) return;
     if (result) return;
     if (timeLeft <= 0) {
-      submit(true);
+    if (timeLeft <= 0 && !submittedRef.current) {
+   submit(true);
+}
+
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeLeft, timeLimitSec, result]);

@@ -1,49 +1,99 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { registerUser } from "../lib/storage";
-import { Card, Input, Select, Button } from "../components/ui";
+import { register } from "../services/authService";
+import { Card, Input, Button } from "../ui";
 
 export default function Register() {
   const nav = useNavigate();
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState("teacher");
-  const [msg, setMsg] = useState("");
+  const [role, setRole] = useState("student");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
 
-  const submit = (e) => {
+  async function onSubmit(e) {
     e.preventDefault();
-    setMsg("");
-    const r = registerUser({ name, email, password, role });
-    if (!r.ok) return setMsg(r.message || "Register failed");
-    nav("/login");
-  };
+    setErr("");
+
+    try {
+      setLoading(true);
+      const user = await register({ name, email, password, role });
+      nav(user.role === "teacher" ? "/teacher" : "/student", { replace: true });
+    } catch (e2) {
+      setErr(e2?.message || "Register failed");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
-    <>
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        <Card className="p-6">
+          <div className="text-xl font-bold mb-1">Create account</div>
+          <div className="text-sm text-slate-500 mb-6">
+            Already have an account?{" "}
+            <Link className="underline" to="/login">
+              Login
+            </Link>
+          </div>
 
-      <div className="min-h-[calc(100vh-140px)] flex items-center justify-center mt-6">
-        <div className="w-full max-w-md">
-          <Card title="Register">
-            <form onSubmit={submit} className="space-y-2">
-              <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} />
-              <Input label="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-              <Input label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-              <Select label="Role" value={role} onChange={(e) => setRole(e.target.value)}>
-                <option value="teacher">Teacher</option>
+          {err && (
+            <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {err}
+            </div>
+          )}
+
+          <form onSubmit={onSubmit} className="space-y-3">
+            <div>
+              <div className="text-sm mb-1">Name</div>
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Your name"
+              />
+            </div>
+
+            <div>
+              <div className="text-sm mb-1">Email</div>
+              <Input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="email@example.com"
+                type="email"
+              />
+            </div>
+
+            <div>
+              <div className="text-sm mb-1">Password</div>
+              <Input
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                type="password"
+              />
+            </div>
+
+            <div>
+              <div className="text-sm mb-1">Role</div>
+              <select
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900"
+              >
                 <option value="student">Student</option>
-              </Select>
+                <option value="teacher">Teacher</option>
+              </select>
+            </div>
 
-              {msg ? <div className="text-sm text-red-600">{msg}</div> : null}
-
-              <div className="flex gap-2 pt-2">
-                <Button type="submit">Create account</Button>
-                <Link className="btnx-ghost" to="/login">Back</Link>
-              </div>
-            </form>
-          </Card>
-        </div>
+            <Button disabled={loading} className="w-full">
+              {loading ? "Creating..." : "Register"}
+            </Button>
+          </form>
+        </Card>
       </div>
-    </>
+    </div>
   );
 }

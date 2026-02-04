@@ -24,7 +24,9 @@ function read(key, fallback) {
 
 function write(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
+  window.dispatchEvent(new CustomEvent("storage_updated", { detail: { key } }));
 }
+
 
 function ensureArray(v) {
   return Array.isArray(v) ? v : [];

@@ -3,7 +3,7 @@ import Card, { CardContent, CardDesc, CardHeader, CardTitle } from "../ui/Card";
 import Button from "../ui/Button";
 import { cn } from "../ui/cn";
 import { useMemo, useRef, useState, useEffect } from "react";
-import { getTests, setTests as saveTests, addTest as addTestToStore } from "../lib/storage";
+import { getTests, setTests as saveTests } from "../lib/storage";
 
 function MiniIcon({ type = "spark" }) {
   const cls = "h-4 w-4";
@@ -87,7 +87,7 @@ function Trend({ value = "+0%" }) {
   );
 }
 
-function StatCard({ label, value, icon, trend }) {
+function StatCard({ label, value, icon, trend, onResults }) {
   return (
     <Card variant="glass">
       <CardHeader compact>
@@ -148,10 +148,30 @@ function Toast({ toast }) {
 }
 
 export default function TeacherDashboard({ go }) {
-  const [tests, setTests] = useState([
-    { id: 1, name: "Basics 1", subject: "Grammar", q: 10, date: "2025-12-29" },
-    { id: 2, name: "Vocabulary A", subject: "Vocab", q: 15, date: "2025-12-28" },
-  ]);
+ const [tests, setTests] = useState(() => safeArr(getTests?.() || []));
+
+useEffect(() => {
+  const refresh = () => setTests(safeArr(getTests?.() || []));
+
+  refresh();
+
+  const onCustom = (e) => {
+    const key = e?.detail?.key;
+    if (!key || key === "tests") refresh();
+  };
+  window.addEventListener("storage_updated", onCustom);
+
+  const onNative = (e) => {
+    if (!e?.key || e.key === "tests") refresh();
+  };
+  window.addEventListener("storage", onNative);
+
+  return () => {
+    window.removeEventListener("storage_updated", onCustom);
+    window.removeEventListener("storage", onNative);
+  };
+}, []);
+
 
   const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:5000";
 
@@ -290,11 +310,21 @@ saveTests(next);
       <Toast toast={toast} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total Tests" value={String(totalTests)} icon="tests" trend="+0%" />
-        <StatCard label="Total Questions" value={String(totalQuestions)} icon="questions" trend="+0%" />
-        <StatCard label="Active Students" value="38" icon="students" trend="+0%" />
-        <StatCard label="AI Generated" value={String(aiGenerated)} icon="spark" trend="+0%" />
-      </div>
+  <StatCard
+    label="Total Tests"
+    value={String(totalTests)}
+    icon="tests"
+    trend="+0%"
+onResults={() => go?.("t_results")}
+
+
+  />
+
+  <StatCard label="Total Questions" value={String(totalQuestions)} icon="questions" trend="+0%" />
+  <StatCard label="Active Students" value="38" icon="students" trend="+0%" />
+  <StatCard label="AI Generated" value={String(aiGenerated)} icon="spark" trend="+0%" />
+</div>
+
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <Card variant="glass" className="lg:col-span-8">
@@ -305,7 +335,7 @@ saveTests(next);
                 <CardDesc>Quick view of your latest created tests</CardDesc>
               </div>
 
-              <Button size="sm" onClick={() => go?.("create")}>
+              <Button size="sm" onClick={() => go?.("t_create")}>
                 Create
               </Button>
             </div>
@@ -373,7 +403,7 @@ saveTests(next);
               <div className="font-semibold text-slate-900">Create New Test</div>
               <div className="text-sm text-slate-600 mt-1">Build manually from question bank.</div>
               <div className="mt-3">
-                <Button type="button" size="sm" onClick={() => go?.("create")}>
+                <Button type="button" size="sm" onClick={() => go?.("t_create")}>
                   Create
                 </Button>
               </div>
@@ -383,7 +413,8 @@ saveTests(next);
               <div className="font-semibold text-slate-900">Import PDF / CSV</div>
               <div className="text-sm text-slate-600 mt-1">Upload content and convert into questions.</div>
               <div className="mt-3">
-                <Button type="button" size="sm" variant="outline" onClick={() => go?.("imports")}>
+                <Button type="button" size="sm" variant="outline" onClick={() => go?.("t_imports")}
+>
                   Import
                 </Button>
               </div>

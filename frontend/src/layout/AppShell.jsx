@@ -1,9 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import Sidebar from "./Sidebar";
-import Header from "./Header";
-import { cn } from "../ui/cn";
-import { STRINGS } from "../i18n/strings";
-import { clearSessionUser } from "../lib/storage";
+// src/layout/AppShell.jsx
+import React from "react";
 
 export default function AppShell({
   title,
@@ -14,127 +10,46 @@ export default function AppShell({
   onSwitchRole,
   children,
 }) {
-
-  
-  // ===== حالات الواجهة (State) =====
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [lang, setLang] = useState(() => localStorage.getItem("lang") || "en");
-
-  // ===== الترجمة + اتجاه الصفحة =====
-  const t = STRINGS[lang] || STRINGS.en;
-  const dir = useMemo(() => (lang === "ar" ? "rtl" : "ltr"), [lang]);
-  const isRtl = dir === "rtl";
-
-  // ===== سلوك الدرج: ESC + منع سكرول الخلفية وقت فتح الدرج =====
-  useEffect(() => {
-    const onKeyDown = (e) => {
-      if (e.key === "Escape") setDrawerOpen(false);
-    };
-
-    if (drawerOpen) {
-      document.addEventListener("keydown", onKeyDown);
-      document.body.style.overflow = "hidden";
-    }
-
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = "";
-    };
-  }, [drawerOpen]);
-
-  // ===== حفظ اللغة وتحديث خصائص HTML (lang/dir) =====
-  useEffect(() => {
-    localStorage.setItem("lang", lang);
-    document.documentElement.lang = lang;
-    document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
-  }, [lang]);
-
-  // ===== اتجاه الدرج حسب RTL/LTR =====
-  const drawerSide = isRtl ? "right-0" : "left-0";
-  const drawerClosedTransform = isRtl ? "translate-x-full" : "-translate-x-full";
-
+  // أي حسابات/متغيرات خَلّها هنا داخل الدالة (مو برا)
   return (
-    <div dir={dir} className="app-bg text-slate-900 min-h-screen">
-      {/* ===== الهيدر العلوي ===== */}
-      <Header
-        title={title}
-        lang={lang}
-        isRtl={isRtl}
-        onToggleLang={() => setLang((p) => (p === "ar" ? "en" : "ar"))}
-        onOpenMobileMenu={() => setDrawerOpen(true)}
-        user={{ name: role === "teacher" ? t.teacher : t.student }}
-       onLogout={() => {
-    clearSessionUser();
-    window.location.reload();
-  }}
-/>
-{onSwitchRole && (
-  <div className="shell pt-3">
-    <button
-      type="button"
-      onClick={() => onSwitchRole(role === "teacher" ? "student" : "teacher")}
-      className="h-9 px-3 rounded-lg border border-slate-200 hover:bg-slate-50"
-    >
-      Switch to {role === "teacher" ? "Student" : "Teacher"}
-    </button>
-  </div>
-)}
+    <div className="app-bg text-slate-900 min-h-screen">
+      {/* Header */}
+      <div className="border-b border-slate-200 bg-white/70">
+        <div className="mx-auto max-w-6xl px-4 py-4 flex items-center justify-between">
+          <div className="font-bold text-lg">{title}</div>
 
-     {/* ===== درج السايدبار (للجوال) ===== */}
-{drawerOpen && (
-  <div className="fixed inset-0 z-50" aria-hidden={!drawerOpen}>
-    {/* طبقة التعتيم (Overlay) */}
-    <div
-      className="absolute inset-0 bg-black/30"
-      onClick={() => setDrawerOpen(false)}
-    />
-
-    {/* لوحة الدرج */}
-    <div
-      className={cn(
-        "absolute top-0 h-full w-[18rem] sm:w-80 bg-white shadow-2xl",
-        "transition-transform duration-200 ease-out will-change-transform",
-        drawerSide,
-        "translate-x-0"
-      )}
-      role="dialog"
-      aria-modal="true"
-    >
-      <div className="h-full flex flex-col">
-        {/* رأس الدرج */}
-        <div className="px-4 py-3 border-b flex items-center justify-between">
-          <div className="font-bold text-slate-900">{t.menu}</div>
-          <button
-            type="button"
-            onClick={() => setDrawerOpen(false)}
-            className="h-9 px-3 rounded-lg border border-slate-200 hover:bg-slate-50"
-          >
-            {t.close}
-          </button>
-        </div>
-
-        {/* قائمة السايدبار */}
-        <div className="flex-1 overflow-auto">
-         <Sidebar
-        role={role}
-        active={active}
-        isRtl={isRtl}
-        items={navItems}
-        onNavigate={(k) => {
-          onNavigate?.(k);
-          setDrawerOpen(false);
-        }}
-        />
-
+          {/* مثال بسيط لإظهار الدور */}
+          <div className="text-sm text-slate-500">
+            Role: <span className="font-semibold">{role}</span>
+          </div>
         </div>
       </div>
-    </div>
-  </div>
-)}
 
+      {/* Body */}
+      <div className="mx-auto max-w-6xl px-4 py-6">
+        {/* Nav (اختياري) */}
+        {Array.isArray(navItems) && navItems.length > 0 && (
+          <div className="mb-4 flex flex-wrap gap-2">
+            {navItems.map((it) => (
+              <button
+                key={it.key}
+                onClick={() => onNavigate?.(it.key)}
+                className={
+                  "rounded-xl px-3 py-2 border text-sm " +
+                  (active === it.key
+                    ? "bg-slate-900 text-white border-slate-900"
+                    : "bg-white border-slate-200 text-slate-700")
+                }
+              >
+                {it.label}
+              </button>
+            ))}
+          </div>
+        )}
 
-      {/* ===== محتوى الصفحة ===== */}
-      <main className="shell">{children}</main>
+        {/* Page content */}
+        <div>{children}</div>
+      </div>
     </div>
   );
 }
