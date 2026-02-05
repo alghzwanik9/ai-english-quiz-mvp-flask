@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import Card, { CardContent, CardDesc, CardHeader, CardTitle } from "../ui/Card.jsx";
 import Button from "../ui/Button.jsx";
 import { cn } from "../ui/cn";
-import { addTest, updateTest } from "../lib/storage";
+import { upsertTest } from "../lib/storage";
+import { createTeacherTest, importQuestionsWithAI } from "../services/teacherService";
 
 function TabButton({ active, children, onClick }) {
   return (
@@ -97,6 +98,8 @@ export default function CreateTest() {
   const [explain, setExplain] = useState("");
 
   const [saveMsg, setSaveMsg] = useState("");
+  const [importText, setImportText] = useState("");
+  const [importLoading, setImportLoading] = useState(false);
 
   const title = useMemo(() => {
     if (tab === "info") return "Test Information";
@@ -125,7 +128,7 @@ export default function CreateTest() {
     };
   };
 
-  const onSave = (goManualAfter = false) => {
+  const onSave = async (goManualAfter = false) => {
     const name = String(testName || "").trim();
     if (!name) {
       setSaveMsg("Please enter Test Name.");
@@ -134,8 +137,29 @@ export default function CreateTest() {
     }
 
     const t = buildTestObject();
-    upsertTest(t);
-    setTestId(t.id);
+
+    // حفظ في الباكند (اختبار فعلي) + تخزين محلي كـ draft/نسخة كاش
+    try {
+      if (Array.isArray(questions) && questions.length) {
+        await createTeacherTest({
+          name: t.name,
+          subject: t.material,
+          difficulty: String(difficulty || "easy").toLowerCase(),
+          questions: questions.map((q) => ({
+            question: q.question,
+            choices: q.choices,
+            answer: q.choices?.[Number(q.correctIndex) || 0],
+            explanation: q.explanation,
+          })),
+        });
+      }
+    } catch (e) {
+      // ما نكسر التجربة لو الباكند فشل، بس نعرض رسالة خفيفة
+      setSaveMsg(e?.message || "Saved locally. Backend save failed.");
+    }
+
+    const stored = upsertTest(t);
+    setTestId(stored.id);
     setSaveMsg("Saved ✅");
     if (goManualAfter) setTab("manual");
   };
@@ -248,7 +272,54 @@ export default function CreateTest() {
               {tab === "ai" ? (
                 <Button size="sm">Generate</Button>
               ) : tab === "import" ? (
-                <Button size="sm" variant="outline">Upload</Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={importLoading}
+                  onClick={async () => {
+                    const text = String(importText || "").trim();
+                    const mat = String(material || "").trim() || "General";
+                    if (!text) {
+                      setSaveMsg("Paste lesson text to import questions.");
+                      return;
+                    }
+                    setSaveMsg("");
+                    setImportLoading(true);
+                    try {
+                      const res = await importQuestionsWithAI({
+                        material: mat,
+                        text,
+                        difficulty: String(difficulty || "easy").toLowerCase(),
+                        count: Number(numQuestions) || 10,
+                        save: false,
+                      });
+                      const imported = (res.questions || []).map((q) => ({
+                        id: Date.now() + Math.random(),
+                        type: "mcq",
+                        question: q.question,
+                        choices: q.choices,
+                        correctIndex: Math.max(
+                          0,
+                          (q.choices || []).findIndex((c) => c === q.answer)
+                        ),
+                        explanation: q.explanation || "",
+                      }));
+                      if (!imported.length) {
+                        setSaveMsg("No questions returned from AI.");
+                        return;
+                      }
+                      setQuestions(imported);
+                      setTab("manual");
+                      setSaveMsg(`Imported ${imported.length} questions ✅`);
+                    } catch (e) {
+                      setSaveMsg(e?.message || "Failed to import questions.");
+                    } finally {
+                      setImportLoading(false);
+                    }
+                  }}
+                >
+                  {importLoading ? "Importing..." : "Import with AI"}
+                </Button>
               ) : (
                 <Button size="sm" variant="outline" onClick={() => onSave(true)}>Preview</Button>
               )}
@@ -332,9 +403,17 @@ export default function CreateTest() {
               <div className="space-y-4">
                 <UploadBox />
                 <div className="text-sm text-slate-600">
-                  After importing, we will show an <b>Imports Review</b> page to edit questions before saving.
+                  Or paste the lesson/content text below and let AI suggest questions for you.
                 </div>
-                <Button size="sm" variant="outline">Go to Imports Review</Button>
+                <label className="block">
+                  <div className="text-sm font-semibold text-slate-800 mb-1">Lesson Text</div>
+                  <textarea
+                    className="inputx min-h-[140px] resize-vertical"
+                    placeholder="Paste the lesson or material text here..."
+                    value={importText}
+                    onChange={(e) => setImportText(e.target.value)}
+                  />
+                </label>
               </div>
             )}
 
@@ -383,7 +462,7 @@ export default function CreateTest() {
             {saveMsg ? <div className="text-xs font-semibold text-slate-700 pt-1">{saveMsg}</div> : null}
 
             <div className="text-xs text-slate-500 pt-2">
-              Save will store the draft locally for now (DB later).
+              Save will store a local draft and try to sync with the backend database.
             </div>
           </CardContent>
         </Card>

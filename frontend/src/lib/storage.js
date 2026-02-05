@@ -32,6 +32,10 @@ function ensureArray(v) {
   return Array.isArray(v) ? v : [];
 }
 
+
+export const getTeacherTests = () => JSON.parse(localStorage.getItem("teacher_tests") || "[]");
+export const setTeacherTests = (v) => localStorage.setItem("teacher_tests", JSON.stringify(v || []));
+
 // ---------- session ----------
 export function setSessionUser(user) {
   write(KEYS.SESSION, user || null);

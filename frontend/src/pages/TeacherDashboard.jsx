@@ -3,7 +3,8 @@ import Card, { CardContent, CardDesc, CardHeader, CardTitle } from "../ui/Card";
 import Button from "../ui/Button";
 import { cn } from "../ui/cn";
 import { useMemo, useRef, useState, useEffect } from "react";
-import { getTests, setTests as saveTests } from "../lib/storage";
+import { getTeacherTests as getTests, setTeacherTests as saveTests } from "../lib/storage";
+import { fetchTeacherTests, createTeacherTest } from "../services/teacherService";
 
 function MiniIcon({ type = "spark" }) {
   const cls = "h-4 w-4";
@@ -146,23 +147,40 @@ function Toast({ toast }) {
     </div>
   );
 }
+function safeArr(v) {
+  return Array.isArray(v) ? v : [];
+}
 
 export default function TeacherDashboard({ go }) {
- const [tests, setTests] = useState(() => safeArr(getTests?.() || []));
+  const [tests, setTests] = useState(() => safeArr(getTests?.() || []));
 
-useEffect(() => {
-  const refresh = () => setTests(safeArr(getTests?.() || []));
+  // تحميل الاختبارات من الباكند عند الدخول
+ useEffect(() => {
+  const refreshFromBackend = async () => {
+    try {
+      const items = await fetchTeacherTests();
+      const next = safeArr(items);
+      setTests(next);
+      saveTests(next);
+    } catch (e) {
+      // فشل الباكند: نبقى على المحلي بدون كسر الواجهة
+      console.warn("fetchTeacherTests failed:", e);
+    }
+  };
 
-  refresh();
+  const refreshLocal = () => setTests(safeArr(getTests?.() || []));
+
+  refreshFromBackend();
+  refreshLocal();
 
   const onCustom = (e) => {
     const key = e?.detail?.key;
-    if (!key || key === "tests") refresh();
+    if (!key || key === "tests") refreshLocal();
   };
   window.addEventListener("storage_updated", onCustom);
 
   const onNative = (e) => {
-    if (!e?.key || e.key === "tests") refresh();
+    if (!e?.key || e.key === "tests") refreshLocal();
   };
   window.addEventListener("storage", onNative);
 
@@ -172,8 +190,7 @@ useEffect(() => {
   };
 }, []);
 
-
-  const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:5000";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
 
   // Toast
   const [toast, setToast] = useState(null); // {type,msg}
@@ -257,7 +274,7 @@ useEffect(() => {
   const questions = useMemo(() => aiResult?.questions || [], [aiResult]);
 
   // ✅ بدل الحفظ المباشر: جهّز Pending + افتح Confirm
-  const createTestFromAI = () => {
+  const createTestFromAI = async () => {
     if (!questions.length) return;
 
     const draft = {
@@ -274,21 +291,45 @@ useEffect(() => {
   };
 
   // ✅ الحفظ النهائي من المودال
-  const confirmSaveTest = () => {
+  const confirmSaveTest = async () => {
     if (!pendingTest) return;
 
-    const next = [pendingTest, ...tests];
-setTests(next);
-saveTests(next);
+    try {
+      // حفظ في الباكند
+      const created = await createTeacherTest({
+        name: pendingTest.name,
+        subject: pendingTest.subject,
+        difficulty,
+        questions: pendingTest.questions?.map((q) => ({
+          question: q.question,
+          choices: q.choices,
+          answer: q.answer,
+          explanation: q.explanation,
+        })),
+      });
 
+      const normalized = {
+        id: created.id,
+        name: created.name,
+        subject: created.subject,
+        q: created.q ?? (created.questions?.length || 0),
+        date: created.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10),
+        questions: created.questions || [],
+      };
 
-    setConfirmOpen(false);
-    setPendingTest(null);
+      const next = [normalized, ...tests];
+      setTests(next);
+      saveTests(next);
 
-    setAiOpen(false);
-    setAiResult(null);
-
-    showToast("success", "Saved as a new Test 💾");
+      showToast("success", "Saved as a new Test 💾");
+    } catch (e) {
+      showToast("error", e?.message || "Failed to save test");
+    } finally {
+      setConfirmOpen(false);
+      setPendingTest(null);
+      setAiOpen(false);
+      setAiResult(null);
+    }
   };
 
   const copyQuestions = async () => {

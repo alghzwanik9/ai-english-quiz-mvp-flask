@@ -14,6 +14,8 @@ import TeacherResults from "./pages/TeacherResults";
 import StudentDashboard from "./pages/StudentDashboard";
 import TakeQuiz from "./pages/TakeQuiz";
 import StudentResults from "./pages/StudentResults";
+import StudentSummarize from "./pages/StudentSummarize";
+import StudentLearn from "./pages/StudentLearn";
 
 import { getUser } from "./services/authService";
 
@@ -47,17 +49,13 @@ export default function App() {
       </Route>
 
       {/* Student */}
-      <Route
-        path="/student"
-        element={
-          <RequireAuth role="student">
-            <AppShell title="Student" role="student" />
-          </RequireAuth>
-        }
-      >
+  <Route path="/student" element={<AppShell title="Student" role="student" />}>
+
         <Route index element={<StudentDashboard />} />
         <Route path="take/:testId" element={<TakeQuiz />} />
         <Route path="results" element={<StudentResults />} />
+        <Route path="summarize" element={<StudentSummarize />} />
+        <Route path="learn" element={<StudentLearn />} />
       </Route>
 
       {/* 404 */}

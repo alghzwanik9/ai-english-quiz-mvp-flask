@@ -1,5 +1,7 @@
 // src/layout/AppShell.jsx
 import React from "react";
+import { Outlet, useNavigate } from "react-router-dom";
+import { getUser, logout } from "../services/authService";
 
 export default function AppShell({
   title,
@@ -10,17 +12,46 @@ export default function AppShell({
   onSwitchRole,
   children,
 }) {
-  // أي حسابات/متغيرات خَلّها هنا داخل الدالة (مو برا)
+  const nav = useNavigate();
+  const user = getUser();
+
+  const handleLogout = () => {
+    logout();
+    nav("/login", { replace: true });
+  };
+
+  const currentRole = user?.role || role;
+
   return (
     <div className="app-bg text-slate-900 min-h-screen">
       {/* Header */}
       <div className="border-b border-slate-200 bg-white/70">
         <div className="mx-auto max-w-6xl px-4 py-4 flex items-center justify-between">
-          <div className="font-bold text-lg">{title}</div>
+          <div className="flex flex-col gap-0.5">
+            <div className="font-bold text-lg">{title}</div>
+            {user && (
+              <div className="text-xs text-slate-500">
+                {user.name} •{" "}
+                <span className="font-semibold">{currentRole}</span>
+              </div>
+            )}
+          </div>
 
-          {/* مثال بسيط لإظهار الدور */}
-          <div className="text-sm text-slate-500">
-            Role: <span className="font-semibold">{role}</span>
+          <div className="flex items-center gap-3">
+            {/* مثال بسيط لإظهار الدور */}
+            {!user && (
+              <div className="text-sm text-slate-500">
+                Role: <span className="font-semibold">{currentRole}</span>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Logout
+            </button>
           </div>
         </div>
       </div>
@@ -48,7 +79,10 @@ export default function AppShell({
         )}
 
         {/* Page content */}
-        <div>{children}</div>
+        <div>
+          {/* نفضّل Outlet لدعم الراوتينغ المتداخل، مع fallback للـ children لو انمرّر صراحة */}
+          {children ? children : <Outlet />}
+        </div>
       </div>
     </div>
   );

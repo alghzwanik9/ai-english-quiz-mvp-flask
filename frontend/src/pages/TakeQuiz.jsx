@@ -1,5 +1,5 @@
-import { useMemo, useState, useEffect, useRef } from "react";
-import { getTests, addAttempt, getSessionUser } from "../lib/storage";
+import { useState, useEffect, useRef } from "react";
+import { useParams } from "react-router-dom";
 
 function safeArr(v) {
   return Array.isArray(v) ? v : [];
@@ -12,68 +12,122 @@ function fmtTime(sec) {
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
-export default function TakeQuiz({ testId, onBack, onFinish }) {
-  const test = useMemo(() => {
-    const tests = safeArr(getTests());
-    return tests.find((t) => String(t.id) === String(testId)) || null;
-  }, [testId]);
+export default function TakeQuiz({ onBack, onFinish }) {
+  const { token } = useParams(); // ✅ جاي من /take/:token
 
+  const [test, setTest] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  // answers: qid -> selectedIndex
   const [answers, setAnswers] = useState({});
   const [result, setResult] = useState(null);
 
-  // ===== Timer config (اختياري داخل الاختبار) =====
-  // تقدر تخزنها داخل test:
-  // test.timeLimitSec = 600 (10 دقائق)
-  // test.passScore = 60 (نجاح من 60%)
-  const timeLimitSec = Number(test?.timeLimitSec || 300); // 0 = بدون وقت
+  // Timer
+  const timeLimitSec = Number(test?.timeLimitSec || 0); // 0 = بدون وقت (من الباك لاحقًا)
   const passScore = Number.isFinite(Number(test?.passScore)) ? Number(test.passScore) : 60;
 
   const [timeLeft, setTimeLeft] = useState(timeLimitSec);
   const submittedRef = useRef(false);
 
-  // ابدأ المؤقت لما يفتح الاختبار (إذا فيه وقت)
+  // ✅ تحميل الاختبار من token
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const res = await fetch(`/api/student/tests/by-token/${token}`);
+        const data = await res.json();
+
+        if (!res.ok || !data?.ok) {
+          throw new Error(data?.error || "Failed to load test.");
+        }
+
+        const item = data.item;
+
+        // ✅ لا يوجد answers من الباك
+        const questions = safeArr(item.questions).map((q) => ({
+          id: q.id,
+          type: "mcq",
+          question: q.question,
+          choices: q.choices || [],
+        }));
+
+        setTest({
+          id: item.id,
+          name: item.name,
+          subject: item.subject,
+          difficulty: item.difficulty,
+          questions,
+          // (اختياري) لو حبيت تضبطها من الباك لاحقًا
+          timeLimitSec: 0,
+          passScore: 60,
+        });
+      } catch (e) {
+        if (!cancelled) setError(e?.message || "Failed to load test.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    if (token) load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  // إعادة ضبط عند تغيير الاختبار
   useEffect(() => {
     submittedRef.current = false;
     setTimeLeft(timeLimitSec);
     setResult(null);
     setAnswers({});
-  }, [testId, timeLimitSec]);
+  }, [token, timeLimitSec]);
 
   // عداد تنازلي
   useEffect(() => {
-  if (!test) return;
-  if (!timeLimitSec) return;
-  if (result) return; // وقف بعد الإنهاء
+    if (!test) return;
+    if (!timeLimitSec) return;
+    if (result) return;
 
-  const t = setInterval(() => {
-    setTimeLeft((prev) => {
-      const next = prev - 1;
-      return next <= 0 ? 0 : next;
-    });
-  }, 1000);
+    const t = setInterval(() => {
+      setTimeLeft((prev) => {
+        const next = prev - 1;
+        return next <= 0 ? 0 : next;
+      });
+    }, 1000);
 
-  return () => clearInterval(t);
-}, [test, timeLimitSec, result]);
+    return () => clearInterval(t);
+  }, [test, timeLimitSec, result]);
 
-
-  // انتهى الوقت → submit تلقائي
+  // انتهى الوقت → submit تلقائي (بدون تصحيح رسمي)
   useEffect(() => {
     if (!timeLimitSec) return;
     if (result) return;
-    if (timeLeft <= 0) {
     if (timeLeft <= 0 && !submittedRef.current) {
-   submit(true);
-}
-
+      submit(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeLeft, timeLimitSec, result]);
 
-  if (!test) {
+  if (loading) {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-6">
+        <div className="font-bold text-slate-900">Loading...</div>
+      </div>
+    );
+  }
+
+  if (error || !test) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-6">
         <div className="font-bold text-slate-900">Test not found</div>
-        <div className="text-sm text-slate-500 mt-1">Go back and choose a test.</div>
+        <div className="text-sm text-slate-500 mt-1">
+          {error || "Open the test using a valid link."}
+        </div>
         <button
           onClick={onBack}
           className="mt-4 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50"
@@ -85,67 +139,77 @@ export default function TakeQuiz({ testId, onBack, onFinish }) {
   }
 
   const onChangeAnswer = (qid, value) => {
-    if (result) return; // منع التعديل بعد الإرسال
+    if (result) return;
     setAnswers((prev) => ({ ...prev, [qid]: value }));
   };
 
-  const gradeQuestion = (q) => {
-    const t = q.type || "mcq";
-    const a = answers[q.id];
+  // ✅ مؤقتًا: لا يوجد تصحيح لأننا لا نملك الإجابات
+  const submit = async (auto = false) => {
+  if (submittedRef.current) return;
+  submittedRef.current = true;
 
-    if (t === "mcq" || t === "reading_mcq") {
-      const idx = Number(a);
-      return Number.isFinite(idx) && idx === Number(q.correctIndex);
-    }
-    if (t === "tf") {
-      const val = a === "true" ? true : a === "false" ? false : null;
-      return val !== null && val === Boolean(q.answer);
-    }
-    if (t === "fill" || t === "reorder") {
-      return (
-        String(a || "").trim().toLowerCase() ===
-        String(q.answer || "").trim().toLowerCase()
-      );
-    }
-    return false;
-  };
+  try {
+   const res = await fetch(`/api/student/tests/by-token/${token}/submit`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    answers,                 // { [qid]: selectedIndex }
+    student_name: me?.name || "",
+    student_email: me?.email || "",
+  }),
+});
+const data = await res.json();
+if (!res.ok || !data.ok) throw new Error(data?.error || "Submit failed");
 
-  const submit = (auto = false) => {
-    const me = getSessionUser?.() || null;
+const r = data.result;
+// هنا استخدم r.score/r.total/r.percent
 
-    if (submittedRef.current) return; // منع تكرار
-    submittedRef.current = true;
+
+    const resObj = {
+      id: Date.now(),
+      testId: r.testId,
+      testName: test.name,
+      total: r.total,
+      score: r.score,
+      percent: r.percent,
+      passed: r.passed,
+      passScore,
+      timeLimitSec: timeLimitSec || 0,
+      finishedBy: auto ? "timeout" : "submit",
+      createdAt: Date.now(),
+    };
+
+    setResult(resObj);
+  } catch (e) {
+    submittedRef.current = false; // يسمح بإعادة المحاولة
+    setError(e?.message || "Failed to submit.");
+  }
 
     const qs = safeArr(test.questions);
-    let score = 0;
-    for (const q of qs) if (gradeQuestion(q)) score++;
-
     const total = qs.length || 0;
-    const percent = total ? Math.round((score / total) * 100) : 0;
-    const passed = percent >= passScore;
+
+    // نعتبر "محاولتك مكتملة" لو جاوبت على كل الأسئلة (اختياري)
+    const answeredCount = Object.keys(answers).length;
+    const completion = total ? Math.round((answeredCount / total) * 100) : 0;
 
     const res = {
-  id: Date.now(), // ✅ مهم
-
-  testId: test.id,
-  testName: test.name,
-  total,
-  score,
-  percent,
-  passed,
-  passScore,
-  timeLimitSec: timeLimitSec || 0,
-  finishedBy: auto ? "timeout" : "submit",
-  createdAt: Date.now(),
-
-  studentName: me?.name || "",
-  studentEmail: me?.email || "",
-};
-
+      id: Date.now(),
+      testId: test.id,
+      testName: test.name,
+      total,
+      answered: answeredCount,
+      completion,
+      percent: completion, // للتوافق مع UI الحالي
+      passed: completion >= passScore, // هذا "Completion" مو "Score"
+      passScore,
+      timeLimitSec: timeLimitSec || 0,
+      finishedBy: auto ? "timeout" : "submit",
+      createdAt: Date.now(),
+      mode: "practice_no_grading",
+    };
 
     setResult(res);
-    addAttempt(res);
-  };
+  }
 
   const reset = () => {
     submittedRef.current = false;
@@ -168,14 +232,7 @@ export default function TakeQuiz({ testId, onBack, onFinish }) {
           </span>
         </div>
 
-        {q.passage ? (
-          <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3 text-slate-700">
-            <div className="text-xs text-slate-500 mb-1">Passage</div>
-            <div>{q.passage}</div>
-          </div>
-        ) : null}
-
-        {(t === "mcq" || t === "reading_mcq") && Array.isArray(q.choices) ? (
+        {(t === "mcq") && Array.isArray(q.choices) ? (
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             {q.choices.map((c, cidx) => (
               <label
@@ -195,39 +252,6 @@ export default function TakeQuiz({ testId, onBack, onFinish }) {
             ))}
           </div>
         ) : null}
-
-        {t === "tf" ? (
-          <div className="mt-3 flex gap-2">
-            {["true", "false"].map((v) => (
-              <label
-                key={v}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-2 flex gap-2 items-center"
-              >
-                <input
-                  disabled={!!result}
-                  type="radio"
-                  name={`q_${q.id}`}
-                  value={v}
-                  checked={String(answers[q.id] ?? "") === v}
-                  onChange={(e) => onChangeAnswer(q.id, e.target.value)}
-                />
-                <span className="text-slate-800">{v === "true" ? "True" : "False"}</span>
-              </label>
-            ))}
-          </div>
-        ) : null}
-
-        {(t === "fill" || t === "reorder") ? (
-          <div className="mt-3">
-            <input
-              disabled={!!result}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-200"
-              placeholder={t === "fill" ? "Type the answer..." : "Type the correct order..."}
-              value={answers[q.id] ?? ""}
-              onChange={(e) => onChangeAnswer(q.id, e.target.value)}
-            />
-          </div>
-        ) : null}
       </div>
     );
   };
@@ -240,9 +264,10 @@ export default function TakeQuiz({ testId, onBack, onFinish }) {
           <div className="text-2xl font-extrabold text-slate-900">{test.name}</div>
           <div className="text-sm text-slate-500">
             {safeArr(test.questions).length} questions
-            {" · "}
-            Passing: {passScore}%
             {timeLimitSec ? ` · Time: ${fmtTime(timeLeft)}` : " · No time limit"}
+          </div>
+          <div className="text-xs text-slate-400 mt-1">
+            Note: This link mode does not include grading yet (answers are not sent to the client).
           </div>
         </div>
 
@@ -259,33 +284,16 @@ export default function TakeQuiz({ testId, onBack, onFinish }) {
       {/* Body */}
       {result ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-5">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div>
-              <div className="text-slate-900 font-extrabold text-xl">
-                Score: {result.score} / {result.total} ({result.percent}%)
-              </div>
-              <div className="text-sm text-slate-500 mt-1">{result.testName}</div>
-              <div className="text-sm mt-2">
-                {result.passed ? (
-                  <span className="inline-flex items-center rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 font-bold">
-                    PASS ✅
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center rounded-full bg-rose-100 text-rose-800 px-3 py-1 font-bold">
-                    FAIL ❌
-                  </span>
-                )}
-                <span className="text-slate-500 ml-2">
-                  (Need {result.passScore}%)
-                </span>
-              </div>
-              {result.finishedBy === "timeout" ? (
-                <div className="text-xs text-rose-600 mt-2 font-semibold">
-                  Time is up — auto submitted.
-                </div>
-              ) : null}
-            </div>
+          <div className="text-slate-900 font-extrabold text-xl">
+            Completed: {result.answered} / {result.total} ({result.completion}%)
           </div>
+          <div className="text-sm text-slate-500 mt-1">{result.testName}</div>
+
+          {result.finishedBy === "timeout" ? (
+            <div className="text-xs text-rose-600 mt-2 font-semibold">
+              Time is up — auto submitted.
+            </div>
+          ) : null}
 
           <div className="mt-4 flex gap-2 flex-wrap">
             <button

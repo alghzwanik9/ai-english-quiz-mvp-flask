@@ -1,15 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { getAttempts, getTests } from "../lib/storage";
 import Card, { CardContent, CardDesc, CardHeader, CardTitle } from "../ui/Card.jsx";
 import Button from "../ui/Button.jsx";
-
+import { getToken } from "../services/authService";
 function safeArr(v) {
   return Array.isArray(v) ? v : [];
 }
 
-function fmtDate(ms) {
+function fmtDate(iso) {
   try {
-    return new Date(ms).toLocaleString();
+    return iso ? new Date(iso).toLocaleString() : "";
   } catch {
     return "";
   }
@@ -18,22 +17,26 @@ function fmtDate(ms) {
 function normalizeAttempt(a) {
   const total = Number(a?.total) || 0;
   const score = Number(a?.score) || 0;
-  const passScore = Number.isFinite(Number(a?.passScore)) ? Number(a.passScore) : 60;
-
   const percent =
     Number.isFinite(Number(a?.percent)) ? Number(a.percent) : total ? Math.round((score / total) * 100) : 0;
 
-  const passed =
-    typeof a?.passed === "boolean" ? a.passed : percent >= passScore;
+  // passScore ثابت مؤقتًا (نقدر نربطه لاحقًا بإعدادات الاختبار)
+  const passScore = 60;
+  const passed = typeof a?.passed === "boolean" ? a.passed : percent >= passScore;
 
   return {
-    ...a,
-    total,
+    id: a?.id,
+    testId: a?.test_id ?? a?.testId,
+    testName: a?.test_name ?? a?.testName, // لو أضفتها لاحقًا
+    studentName: a?.student_name ?? a?.studentName,
+    studentEmail: a?.student_email ?? a?.studentEmail,
     score,
-    passScore,
+    total,
     percent,
+    passScore,
     passed,
-    createdAt: Number(a?.createdAt) || Date.now(),
+    finishedBy: a?.finishedBy || "submit",
+    createdAt: a?.created_at || a?.createdAt, // ISO من الباك
   };
 }
 
@@ -50,14 +53,45 @@ function Badge({ ok, children }) {
   );
 }
 
-
-
-export default function TeacherResults({ onBack }) {
-  const tests = useMemo(() => safeArr(getTests?.() || []), []);
-  const attemptsRaw = useMemo(() => safeArr(getAttempts?.() || []), []);
-  const attempts = useMemo(() => attemptsRaw.map(normalizeAttempt), [attemptsRaw]);
+export default function TeacherResults({ token, onBack }) {
+  const [tests, setTests] = useState([]);
+  const [attemptsRaw, setAttemptsRaw] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
 
   const [filterTestId, setFilterTestId] = useState("all");
+
+  // ✅ تحميل من السيرفر
+ useEffect(() => {
+  let cancelled = false;
+
+  async function load() {
+    try {
+      setLoading(true);
+      setErr("");
+
+      const token = getToken();
+      if (!token) throw new Error("No token found. Please login again.");
+
+      const rRes = await fetch("/api/teacher/results", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const rData = await rRes.json();
+      if (!rRes.ok || !rData?.ok) throw new Error(rData?.error || "Failed to load results");
+
+      if (!cancelled) setAttemptsRaw(rData.items || []);
+    } catch (e) {
+      if (!cancelled) setErr(e?.message || "Error");
+    } finally {
+      if (!cancelled) setLoading(false);
+    }
+  }
+
+  load();
+  return () => { cancelled = true; };
+}, []);
+
+  const attempts = useMemo(() => attemptsRaw.map(normalizeAttempt), [attemptsRaw]);
 
   const filtered = useMemo(() => {
     const list =
@@ -65,36 +99,12 @@ export default function TeacherResults({ onBack }) {
         ? attempts
         : attempts.filter((a) => String(a?.testId) === String(filterTestId));
 
-        useEffect(() => {
-  const refresh = () => {
-    setTests(safeArr(getTests?.() || []));
-    setAttemptsRaw(safeArr(getAttempts?.() || []));
-  };
-
-  // تحديث عند فتح الصفحة
-  refresh();
-
-  // تحديث عند التخزين (لو عندك event مخصص)
-  const onCustom = (e) => {
-    const key = e?.detail?.key;
-    if (!key || key === "tests" || key === "results") refresh();
-  };
-  window.addEventListener("storage_updated", onCustom);
-
-  // تحديث لو صار تغيير من تبويب ثاني
-  const onNative = (e) => {
-    if (!e?.key || e.key === "tests" || e.key === "results") refresh();
-  };
-  window.addEventListener("storage", onNative);
-
-  return () => {
-    window.removeEventListener("storage_updated", onCustom);
-    window.removeEventListener("storage", onNative);
-  };
-}, []);
-
     // ✅ الأحدث أولاً
-    return [...list].sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+    return [...list].sort((a, b) => {
+      const ta = a?.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const tb = b?.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return tb - ta;
+    });
   }, [attempts, filterTestId]);
 
   const total = filtered.length;
@@ -102,6 +112,26 @@ export default function TeacherResults({ onBack }) {
   const avg = total
     ? Math.round(filtered.reduce((s, a) => s + (Number(a?.percent) || 0), 0) / total)
     : 0;
+
+  if (loading) {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-6">
+        <div className="font-bold text-slate-900">Loading...</div>
+      </div>
+    );
+  }
+
+  if (err) {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-6">
+        <div className="font-bold text-slate-900">Failed to load</div>
+        <div className="text-sm text-slate-500 mt-1">{err}</div>
+        <Button className="mt-4" size="sm" variant="outline" onClick={onBack}>
+          Back
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -168,7 +198,9 @@ export default function TeacherResults({ onBack }) {
             >
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <div className="font-extrabold text-slate-900">{a?.testName || "Test"}</div>
+                  <div className="font-extrabold text-slate-900">
+                    {a?.testName || `Test #${a?.testId}`}
+                  </div>
                   <div className="text-xs text-slate-500 mt-1">{fmtDate(a?.createdAt)}</div>
                   <div className="text-xs text-slate-500 mt-1">
                     Student: {a?.studentName || a?.studentEmail || "Unknown"}
