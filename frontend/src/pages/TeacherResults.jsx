@@ -1,236 +1,178 @@
-import { useEffect, useMemo, useState } from "react";
-import Card, { CardContent, CardDesc, CardHeader, CardTitle } from "../ui/Card.jsx";
-import Button from "../ui/Button.jsx";
-import { getToken } from "../services/authService";
-function safeArr(v) {
-  return Array.isArray(v) ? v : [];
+// src/pages/TeacherResults.jsx (أو نفس مسارك الحالي)
+import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Card, Button } from "../ui";
+import {
+  fetchTeacherTests,
+  fetchTeacherResults,
+  fetchTestResults,
+} from "/src/services/teacherService.js";
+
+function useQuery() {
+  const { search } = useLocation();
+  return useMemo(() => new URLSearchParams(search), [search]);
 }
 
-function fmtDate(iso) {
-  try {
-    return iso ? new Date(iso).toLocaleString() : "";
-  } catch {
-    return "";
+function toNumber(x) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatCreatedAt(value) {
+  if (value == null) return "—";
+
+  // عندك created_at في DB غالبًا integer (epoch seconds)
+  // بعض APIs ترجع milliseconds أو ISO string
+  if (typeof value === "number") {
+    const ms = value < 1e12 ? value * 1000 : value; // sec -> ms
+    return new Date(ms).toLocaleString();
   }
+
+  // string: ISO
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString();
 }
 
-function normalizeAttempt(a) {
-  const total = Number(a?.total) || 0;
-  const score = Number(a?.score) || 0;
-  const percent =
-    Number.isFinite(Number(a?.percent)) ? Number(a.percent) : total ? Math.round((score / total) * 100) : 0;
+export default function TeacherResults() {
+  const nav = useNavigate();
+  const q = useQuery();
+  const initialTestId = toNumber(q.get("testId"));
 
-  // passScore ثابت مؤقتًا (نقدر نربطه لاحقًا بإعدادات الاختبار)
-  const passScore = 60;
-  const passed = typeof a?.passed === "boolean" ? a.passed : percent >= passScore;
-
-  return {
-    id: a?.id,
-    testId: a?.test_id ?? a?.testId,
-    testName: a?.test_name ?? a?.testName, // لو أضفتها لاحقًا
-    studentName: a?.student_name ?? a?.studentName,
-    studentEmail: a?.student_email ?? a?.studentEmail,
-    score,
-    total,
-    percent,
-    passScore,
-    passed,
-    finishedBy: a?.finishedBy || "submit",
-    createdAt: a?.created_at || a?.createdAt, // ISO من الباك
-  };
-}
-
-function Badge({ ok, children }) {
-  return (
-    <span
-      className={
-        "inline-flex items-center rounded-full px-3 py-1 text-xs font-bold " +
-        (ok ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800")
-      }
-    >
-      {children}
-    </span>
-  );
-}
-
-export default function TeacherResults({ token, onBack }) {
   const [tests, setTests] = useState([]);
-  const [attemptsRaw, setAttemptsRaw] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [testId, setTestId] = useState(initialTestId);
+  const [items, setItems] = useState([]);
+  const [title, setTitle] = useState("");
+  const [busy, setBusy] = useState(true);
   const [err, setErr] = useState("");
 
-  const [filterTestId, setFilterTestId] = useState("all");
-
-  // ✅ تحميل من السيرفر
- useEffect(() => {
-  let cancelled = false;
-
   async function load() {
+    setBusy(true);
+    setErr("");
+
     try {
-      setLoading(true);
-      setErr("");
+      const t = await fetchTeacherTests();
+      setTests(Array.isArray(t) ? t : (t?.items || []));
 
-      const token = getToken();
-      if (!token) throw new Error("No token found. Please login again.");
-
-      const rRes = await fetch("/api/teacher/results", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const rData = await rRes.json();
-      if (!rRes.ok || !rData?.ok) throw new Error(rData?.error || "Failed to load results");
-
-      if (!cancelled) setAttemptsRaw(rData.items || []);
+      if (testId) {
+        const data = await fetchTestResults(testId);
+        setTitle(data?.test?.name ? `نتائج: ${data.test.name}` : "نتائج اختبار");
+        setItems(Array.isArray(data?.items) ? data.items : []);
+      } else {
+        const all = await fetchTeacherResults();
+        setTitle("كل النتائج");
+        setItems(Array.isArray(all) ? all : (all?.items || []));
+      }
     } catch (e) {
-      if (!cancelled) setErr(e?.message || "Error");
+      setErr(e?.message || "Failed to load results");
+      setItems([]);
     } finally {
-      if (!cancelled) setLoading(false);
+      setBusy(false);
     }
   }
 
-  load();
-  return () => { cancelled = true; };
-}, []);
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [testId]);
 
-  const attempts = useMemo(() => attemptsRaw.map(normalizeAttempt), [attemptsRaw]);
-
-  const filtered = useMemo(() => {
-    const list =
-      filterTestId === "all"
-        ? attempts
-        : attempts.filter((a) => String(a?.testId) === String(filterTestId));
-
-    // ✅ الأحدث أولاً
-    return [...list].sort((a, b) => {
-      const ta = a?.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const tb = b?.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return tb - ta;
-    });
-  }, [attempts, filterTestId]);
-
-  const total = filtered.length;
-  const passed = filtered.filter((a) => a?.passed).length;
-  const avg = total
-    ? Math.round(filtered.reduce((s, a) => s + (Number(a?.percent) || 0), 0) / total)
-    : 0;
-
-  if (loading) {
-    return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-6">
-        <div className="font-bold text-slate-900">Loading...</div>
-      </div>
-    );
-  }
-
-  if (err) {
-    return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-6">
-        <div className="font-bold text-slate-900">Failed to load</div>
-        <div className="text-sm text-slate-500 mt-1">{err}</div>
-        <Button className="mt-4" size="sm" variant="outline" onClick={onBack}>
-          Back
-        </Button>
-      </div>
-    );
-  }
+  const testsOptions = useMemo(() => {
+    return [
+      { id: "", name: "كل الاختبارات" },
+      ...tests.map((t) => ({ id: String(t.id), name: t.name })),
+    ];
+  }, [tests]);
 
   return (
-    <div className="space-y-6">
-      <Card variant="glass">
-        <CardHeader compact>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <CardTitle>Results (Teacher)</CardTitle>
-              <CardDesc>See student attempts and performance</CardDesc>
-            </div>
-            <Button size="sm" variant="outline" onClick={onBack}>
-              Back
-            </Button>
-          </div>
-        </CardHeader>
+    <div className="space-y-8 animate-in">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="space-y-1">
+          <h2 className="section-title">
+            {title || "Results Dashboard"}
+          </h2>
+          <p className="section-desc">Track and analyze student performances.</p>
+        </div>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={() => nav("/teacher")}>
+            Back to Dashboard
+          </Button>
+          <Button onClick={load}>
+            Refresh Data
+          </Button>
+        </div>
+      </div>
 
-        <CardContent compact className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="text-sm font-semibold text-slate-700">Filter by test:</div>
+      {err ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 leading-relaxed">
+          {err}
+        </div>
+      ) : null}
+
+      <Card className="p-6" title="Filter Results">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end">
+          <div className="w-full md:max-w-md">
+            <label className="label-premium">Select Test</label>
             <select
-              className="selectx"
-              value={filterTestId}
-              onChange={(e) => setFilterTestId(e.target.value)}
+              className="input-premium appearance-none py-2 h-11"
+              value={testId ? String(testId) : ""}
+              onChange={(e) => setTestId(e.target.value ? Number(e.target.value) : null)}
+              style={{
+                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='white'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 1rem center',
+                backgroundSize: '1.2em'
+              }}
             >
-              <option value="all">All</option>
-              {tests.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
+              {testsOptions.map((o) => (
+                <option key={o.id} value={o.id} className="bg-[#0f172a] text-white">
+                  {o.name}
                 </option>
               ))}
             </select>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="rounded-2xl border border-slate-200/60 bg-white/70 p-4">
-              <div className="text-xs text-slate-500">Attempts</div>
-              <div className="text-2xl font-extrabold text-slate-900">{total}</div>
-            </div>
-            <div className="rounded-2xl border border-slate-200/60 bg-white/70 p-4">
-              <div className="text-xs text-slate-500">Passed</div>
-              <div className="text-2xl font-extrabold text-slate-900">{passed}</div>
-            </div>
-            <div className="rounded-2xl border border-slate-200/60 bg-white/70 p-4">
-              <div className="text-xs text-slate-500">Average</div>
-              <div className="text-2xl font-extrabold text-slate-900">{avg}%</div>
-            </div>
-          </div>
-        </CardContent>
+        </div>
       </Card>
 
-      {filtered.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-10 text-center">
-          <div className="font-bold text-slate-900">No attempts yet</div>
-          <div className="text-sm text-slate-500 mt-1">
-            Once students take tests, results will appear here.
+      <Card className="p-6" title="Attempt Details">
+        {busy ? (
+          <div className="p-10 text-center text-slate-400">Loading results...</div>
+        ) : items.length === 0 ? (
+          <div className="p-10 text-center text-slate-400">No results found for this selection.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-slate-500 text-[10px] uppercase font-bold tracking-[0.1em]">
+                <tr className="border-b border-white/5">
+                  <th className="py-4 px-2">Student Name</th>
+                  <th className="py-4 px-2">Email</th>
+                  <th className="py-4 px-2">Score</th>
+                  <th className="py-4 px-2">Percentage</th>
+                  <th className="py-4 px-2">Date</th>
+                </tr>
+              </thead>
+ 
+              <tbody className="divide-y divide-white/[0.03]">
+                {items.map((r) => (
+                  <tr key={r.id} className="group hover:bg-white/[0.02] transition-colors">
+                    <td className="py-4 px-2 font-medium text-white">{r.student_name || "Guest"}</td>
+                    <td className="py-4 px-2 text-slate-400">{r.student_email || "—"}</td>
+                    <td className="py-4 px-2 font-semibold text-indigo-400">
+                      {Number(r.score)}/{Number(r.total)}
+                    </td>
+                    <td className="py-4 px-2">
+                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                         Number(r.percent) >= 50 ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
+                       }`}>
+                        {Number.isFinite(Number(r.percent)) ? `${Math.round(Number(r.percent))}%` : "—"}
+                       </span>
+                    </td>
+                    <td className="py-4 px-2 text-slate-500 text-xs">{formatCreatedAt(r.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {filtered.map((a) => (
-            <div
-              key={a.id ?? `${a.testId}_${a.createdAt}_${a.studentEmail || a.studentName || ""}`}
-              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="font-extrabold text-slate-900">
-                    {a?.testName || `Test #${a?.testId}`}
-                  </div>
-                  <div className="text-xs text-slate-500 mt-1">{fmtDate(a?.createdAt)}</div>
-                  <div className="text-xs text-slate-500 mt-1">
-                    Student: {a?.studentName || a?.studentEmail || "Unknown"}
-                  </div>
-                </div>
-                <Badge ok={!!a?.passed}>{a?.passed ? "PASS" : "FAIL"}</Badge>
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                <div className="rounded-xl border border-slate-200/60 bg-white/70 p-3">
-                  <div className="text-xs text-slate-500">Score</div>
-                  <div className="font-bold text-slate-900">
-                    {a?.score}/{a?.total} ({a?.percent ?? 0}%)
-                  </div>
-                </div>
-                <div className="rounded-xl border border-slate-200/60 bg-white/70 p-3">
-                  <div className="text-xs text-slate-500">Passing</div>
-                  <div className="font-bold text-slate-900">{a?.passScore ?? 60}%</div>
-                </div>
-              </div>
-
-              {a?.finishedBy === "timeout" ? (
-                <div className="mt-3 text-xs font-semibold text-rose-700">
-                  Timeout — auto submitted.
-                </div>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      )}
+        )}
+      </Card>
     </div>
   );
 }

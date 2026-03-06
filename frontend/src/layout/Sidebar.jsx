@@ -1,207 +1,95 @@
-import { cn } from "../ui/cn";
+import React from "react";
+import { NavLink } from "react-router-dom";
+import { 
+  LayoutDashboard, 
+  FileText, 
+  Settings, 
+  PlusCircle, 
+  GraduationCap,
+  History,
+  X
+} from "lucide-react";
+import { cn } from "../ui";
 
-function Icon({ name, className = "" }) {
-  const base = "h-5 w-5";
-  switch (name) {
-    case "dashboard":
-      return (
-        <svg className={cn(base, className)} viewBox="0 0 24 24" fill="none">
-          <path
-            d="M4 13h7V4H4v9Zm9 7h7V11h-7v9ZM4 20h7v-5H4v5Zm9-11h7V4h-7v5Z"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinejoin="round"
-          />
-        </svg>
-      );
-    case "create":
-      return (
-        <svg className={cn(base, className)} viewBox="0 0 24 24" fill="none">
-          <path
-            d="M12 5v14M5 12h14"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
-        </svg>
-      );
-    case "bank":
-      return (
-        <svg className={cn(base, className)} viewBox="0 0 24 24" fill="none">
-          <path d="M7 4h10v16H7V4Z" stroke="currentColor" strokeWidth="1.8" />
-          <path
-            d="M9 8h6M9 12h6M9 16h4"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
-        </svg>
-      );
-    case "imports":
-      return (
-        <svg className={cn(base, className)} viewBox="0 0 24 24" fill="none">
-          <path
-            d="M12 3v10"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
-          <path
-            d="M8 9l4 4 4-4"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M5 21h14"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
-        </svg>
-      );
-    case "settings":
-      return (
-        <svg className={cn(base, className)} viewBox="0 0 24 24" fill="none">
-          <path
-            d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
-            stroke="currentColor"
-            strokeWidth="1.8"
-          />
-          <path
-            d="M19.4 15a7.8 7.8 0 0 0 .1-2l2-1.2-2-3.5-2.3.6a7.8 7.8 0 0 0-1.7-1l-.3-2.3H9.2L8.9 7.9a7.8 7.8 0 0 0-1.7 1l-2.3-.6-2 3.5 2 1.2a7.8 7.8 0 0 0 .1 2l-2 1.2 2 3.5 2.3-.6c.5.4 1.1.7 1.7 1l.3 2.3h5.6l.3-2.3c.6-.3 1.2-.6 1.7-1l2.3.6 2-3.5-2-1.2Z"
-            stroke="currentColor"
-            strokeWidth="1.1"
-            strokeLinejoin="round"
-          />
-        </svg>
-      );
+export default function Sidebar({ open, setOpen, role = "teacher" }) {
+  const teacherLinks = [
+    { to: "/teacher", label: "Overview", icon: LayoutDashboard },
+    { to: "/teacher/tests", label: "My Tests", icon: FileText },
+    { to: "/teacher/create", label: "Create Test", icon: PlusCircle },
+    { to: "/teacher/results", label: "Results", icon: GraduationCap },
+  ];
 
-    // ✅ أيقونات إضافية لصفحات الطالب/النتائج
-    case "tests":
-      return (
-        <svg className={cn(base, className)} viewBox="0 0 24 24" fill="none">
-          <path d="M7 4h10v16H7V4Z" stroke="currentColor" strokeWidth="1.8" />
-          <path
-            d="M9 8h6M9 12h6M9 16h4"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
-        </svg>
-      );
-    case "spark":
-      return (
-        <svg className={cn(base, className)} viewBox="0 0 24 24" fill="none">
-          <path
-            d="M12 2l1.2 4.2L17.4 8 13.2 9.2 12 13.4 10.8 9.2 6.6 8l4.2-1.8L12 2Z"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M19 13l.8 2.8 2.8.8-2.8.8L19 20l-.8-2.8-2.8-.8 2.8-.8L19 13Z"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinejoin="round"
-          />
-        </svg>
-      );
+  const studentLinks = [
+    { to: "/student", label: "Quiz Portal", icon: LayoutDashboard },
+    { to: "/student/history", label: "My History", icon: History },
+  ];
 
-    default:
-      return null;
-  }
-}
-
-const teacherNavFallback = [
-  { key: "dashboard", label: "Dashboard", icon: "dashboard" },
-  { key: "create", label: "Create Test", icon: "create" },
-  { key: "bank", label: "Question Bank", icon: "bank" },
-  { key: "imports", label: "Imports Review", icon: "imports" },
-  { key: "settings", label: "Settings", icon: "settings" },
-];
-
-export default function Sidebar({
-  role = "teacher",
-  active = "dashboard",
-  onNavigate,
-  isRtl = false,
-  items,
-}) {
-  // ✅ لو AppShell مرّر items نستخدمها، وإلا نرجع للفولباك
-  const nav = Array.isArray(items) && items.length > 0 ? items : teacherNavFallback;
+  const links = role === "teacher" ? teacherLinks : studentLinks;
 
   return (
-    <aside className="h-full w-72">
-      <div
-        className={cn(
-          "h-full bg-white/70 backdrop-blur-xl",
-          isRtl ? "border-l border-slate-200/60" : "border-r border-slate-200/60"
-        )}
-      >
-        {/* رأس السايدبار */}
-        <div className="px-5 pt-5 pb-4">
-          <div className={cn("flex items-center gap-3", isRtl && "flex-row-reverse")}>
-            <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-indigo-600 to-blue-600 shadow-sm" />
-            <div className={cn(isRtl ? "text-right" : "text-left")}>
-              <div className="font-extrabold text-slate-900 leading-5">AI English Quiz</div>
-              <div className="text-xs text-slate-500">
-                {role === "teacher" ? "Teacher Panel" : "Student Panel"}
-              </div>
-            </div>
-          </div>
-        </div>
+    <>
+      {/* Mobile Overlay */}
+      {open && (
+        <div 
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 lg:hidden transition-all duration-300"
+          onClick={() => setOpen(false)}
+        />
+      )}
 
-        {/* روابط التنقل */}
-        <nav className="px-3 pb-5 space-y-1">
-          {nav.map((it) => {
-            const isActive = it.key === active;
-            return (
-              <button
-                key={it.key}
-                onClick={() => onNavigate?.(it.key)}
-                className={cn(
-                  "group w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition",
-                  isRtl ? "text-right flex-row-reverse" : "text-left",
-                  isActive
-                    ? "bg-indigo-50/80 text-indigo-700 border border-indigo-100 shadow-sm"
-                    : "text-slate-700 hover:bg-white/70 hover:shadow-sm"
+      <aside className={cn(
+        "fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-black transform transition-transform duration-500 ease-out lg:translate-x-0 lg:static lg:inset-0",
+        open ? "translate-x-0" : "-translate-x-full"
+      )}>
+        <div className="h-full flex flex-col p-6">
+          {/* Logo & Close */}
+          <div className="flex items-center justify-between mb-12">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center text-white">
+                <GraduationCap size={24} weight="bold" />
+              </div>
+              <span className="text-xl font-black text-black tracking-tighter uppercase font-mono">
+                AI QUIZ <span className="text-[10px] block opacity-40 -mt-1 tracking-widest">BETA V1.0</span>
+              </span>
+            </div>
+            <button className="lg:hidden p-2 text-black hover:bg-zinc-100 rounded-lg" onClick={() => setOpen(false)}>
+              <X size={20} />
+            </button>
+          </div>
+
+          <nav className="flex-1 space-y-2">
+            <div className="text-[10px] font-black text-black opacity-30 uppercase tracking-[0.3em] mb-6 ml-3">Navigation Manager</div>
+            {links.map((link) => (
+              <NavLink
+                key={link.to}
+                to={link.to}
+                onClick={() => setOpen(false)}
+                className={({ isActive }) => cn(
+                  "flex items-center gap-4 px-4 py-4 rounded-xl text-sm font-black transition-all duration-200 uppercase tracking-widest",
+                  isActive 
+                    ? "bg-black text-white shadow-xl shadow-black/10 translate-x-1" 
+                    : "text-zinc-500 hover:text-black hover:bg-zinc-50"
                 )}
               >
-                <span
-                  className={cn(
-                    "grid place-items-center h-9 w-9 rounded-xl border transition",
-                    isActive
-                      ? "bg-white border-indigo-100"
-                      : "bg-slate-50/70 border-slate-200/60 group-hover:bg-white"
-                  )}
-                >
-                  <Icon
-                    name={it.icon}
-                    className={isActive ? "text-indigo-700" : "text-slate-600"}
-                  />
-                </span>
+                <link.icon size={20} strokeWidth={2.5} />
+                {link.label}
+              </NavLink>
+            ))}
+          </nav>
 
-                <span className="font-semibold">{it.label}</span>
-
-                <span
-                  className={cn(
-                    isRtl ? "mr-auto" : "ml-auto",
-                    "h-2 w-2 rounded-full",
-                    isActive ? "bg-indigo-600" : "bg-transparent"
-                  )}
-                />
-              </button>
-            );
-          })}
-        </nav>
-
-        {/* الفوتر */}
-        <div className="px-5 pb-5 pt-2 border-t border-slate-200/60 text-xs text-slate-400">
-          v1 • TESTING
+          <NavLink
+            to="/settings"
+            className={({ isActive }) => cn(
+              "flex items-center gap-4 px-4 py-4 rounded-xl text-sm font-black transition-all duration-200 mt-auto uppercase tracking-widest",
+              isActive 
+                ? "bg-black text-white" 
+                : "text-zinc-500 hover:text-black hover:bg-zinc-50"
+            )}
+          >
+            <Settings size={20} strokeWidth={2.5} />
+            Settings
+          </NavLink>
         </div>
-      </div>
-    </aside>
+      </aside>
+    </>
   );
 }

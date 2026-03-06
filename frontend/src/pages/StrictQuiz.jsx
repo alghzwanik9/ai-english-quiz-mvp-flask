@@ -1,254 +1,104 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { getToken, logout } from "../services/authService";
+// ===============================================
+import React, { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Card, Button } from "../ui";
+import { fetchTeacherTests } from "../services/teacherService";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:5000";
-
-function cls(...x) {
-  return x.filter(Boolean).join(" ");
+function shareUrlForToken(token) {
+  if (!token) return "";
+  return `${window.location.origin}/quiz/${token}`;
 }
 
-export default function StrictQuiz({ onBack }) {
+function useQueryParam(name) {
+  const { search } = useLocation();
+  return new URLSearchParams(search).get(name);
+}
+
+export default function StrictQuiz() {
   const nav = useNavigate();
+  const testId = useQueryParam("testId");
 
-  const [subject, setSubject] = useState("General");
-  const [text, setText] = useState("");
-  const [count, setCount] = useState(5);
-  const [difficulty, setDifficulty] = useState("easy");
-  const [save, setSave] = useState(false);
-
-  const [loading, setLoading] = useState(false);
+  const [tests, setTests] = useState([]);
   const [err, setErr] = useState("");
-  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(true);
 
-  const canSubmit = useMemo(
-    () => text.trim().length >= 20 && Number(count) > 0,
-    [text, count]
-  );
-
-  const generate = async () => {
+  async function load() {
+    setBusy(true);
     setErr("");
-    setResult(null);
-    setLoading(true);
-
     try {
-   const token = getToken();
-
-const res = await fetch(`${API_BASE}/api/ai/generate-quiz`, {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  },
-  body: JSON.stringify({ subject, text, count: Number(count), difficulty, save }),
-});
-
-
-      // لو التوكن منتهي/غير صحيح
-      if (res.status === 401) {
-        logout();
-        nav("/login", { replace: true });
-        return;
-      }
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(
-          data?.error || data?.message || `Request failed (${res.status})`
-        );
-      }
-
-      setResult(data);
+      const t = await fetchTeacherTests();
+      setTests(t);
     } catch (e) {
-      setErr(e?.message || "Something went wrong");
+      setErr(e?.message || "Failed to load tests");
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
-  };
+  }
 
-  const copyJson = async () => {
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function copy(text) {
     try {
-      await navigator.clipboard.writeText(JSON.stringify(result, null, 2));
-      alert("Copied!");
+      await navigator.clipboard.writeText(text);
+      alert("تم النسخ ✅");
     } catch {
-      alert("Copy failed");
+      alert("ما قدرت أنسخ. انسخ يدويًا.");
     }
-  };
+  }
+
+  const selected = testId ? tests.find((t) => String(t.id) === String(testId)) : null;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto max-w-5xl px-4 py-8">
-        {/* Header */}
-        <div className="mb-6 flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold">STRICT-QUIZ</h1>
-            <p className="text-sm text-slate-600">
-              Paste your lesson content and generate questions strictly from it.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {onBack && (
-              <button
-                onClick={onBack}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50"
-              >
-                Back
-              </button>
-            )}
-            <button
-              onClick={generate}
-              disabled={!canSubmit || loading}
-              className={cls(
-                "rounded-xl px-4 py-2 text-sm font-medium",
-                canSubmit && !loading
-                  ? "bg-slate-900 text-white hover:bg-slate-800"
-                  : "bg-slate-200 text-slate-500 cursor-not-allowed"
-              )}
-            >
-              {loading ? "Generating..." : "Generate"}
-            </button>
-          </div>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xl font-semibold">مشاركة الاختبارات</div>
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={() => nav("/teacher")}>رجوع</Button>
+          <Button variant="ghost" onClick={load}>تحديث</Button>
         </div>
+      </div>
 
-        {/* Controls */}
-        <div className="grid grid-cols-1 gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-12">
-          <div className="md:col-span-4">
-            <label className="mb-1 block text-xs font-medium text-slate-600">
-              Subject
-            </label>
-            <input
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-200"
-              placeholder="e.g., Physics / Biology / OS / Math..."
-            />
-          </div>
+      {err ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{err}</div>
+      ) : null}
 
-          <div className="md:col-span-2">
-            <label className="mb-1 block text-xs font-medium text-slate-600">
-              Questions
-            </label>
-            <input
-              type="number"
-              min="1"
-              max="20"
-              value={count}
-              onChange={(e) => setCount(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-200"
-            />
-          </div>
+      <Card title="روابط المشاركة (public_token)">
+        {busy ? (
+          <div className="muted">جاري التحميل…</div>
+        ) : tests.length === 0 ? (
+          <div className="muted">ما عندك اختبارات.</div>
+        ) : (
+          <div className="space-y-2">
+            {(selected ? [selected] : tests).map((t) => {
+              const url = shareUrlForToken(t.public_token);
+              return (
+                <div key={t.id} className="rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="font-semibold">{t.name}</div>
+                  <div className="text-xs text-slate-500">{t.subject} • {t.difficulty}</div>
 
-          <div className="md:col-span-3">
-            <label className="mb-1 block text-xs font-medium text-slate-600">
-              Difficulty
-            </label>
-            <select
-              value={difficulty}
-              onChange={(e) => setDifficulty(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-200"
-            >
-              <option value="easy">Easy</option>
-              <option value="medium">Medium</option>
-              <option value="hard">Hard</option>
-            </select>
-          </div>
-
-          <div className="md:col-span-3 flex items-end">
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={save}
-                onChange={(e) => setSave(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300"
-              />
-              Save to DB
-            </label>
-          </div>
-
-          <div className="md:col-span-12">
-            <label className="mb-1 block text-xs font-medium text-slate-600">
-              Lesson text
-            </label>
-            <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              rows={8}
-              className="w-full resize-y rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-slate-200"
-              placeholder="Paste the lesson content here..."
-            />
-            <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
-              <span>{text.trim().length} chars</span>
-              <span>{canSubmit ? "Ready" : "Type at least ~20 characters"}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Errors */}
-        {err && (
-          <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {err}
-          </div>
-        )}
-
-        {/* Result */}
-        {result && (
-          <div className="mt-6">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Generated Questions</h2>
-              <button
-                onClick={copyJson}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50"
-              >
-                Copy JSON
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4">
-              {(result.questions || []).map((q, idx) => (
-                <div
-                  key={idx}
-                  className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-xs text-slate-500">Q{idx + 1}</div>
-                      <div className="mt-1 font-medium">{q.question}</div>
-                    </div>
-                    <div className="rounded-xl bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
-                      {q.answer || q.correct_answer || "?"}
-                    </div>
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-                    {(q.choices || []).map((c, i) => (
-                      <div
-                        key={i}
-                        className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
-                      >
-                        {c}
+                  {t.public_token ? (
+                    <div className="mt-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <div className="text-xs break-all">
+                        <span className="font-mono">{url}</span>
                       </div>
-                    ))}
-                  </div>
-
-                  {q.explanation && (
-                    <div className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
-                      <span className="font-medium">Explanation: </span>
-                      {q.explanation}
+                      <div className="flex gap-2">
+                        <Button variant="ghost" onClick={() => copy(url)}>نسخ</Button>
+                        <Button variant="ghost" onClick={() => nav(`/teacher/results?testId=${t.id}`)}>نتائج</Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-xs text-slate-500">
+                      لا يوجد public_token لهذا الاختبار (تحقق من DB/migrations).
                     </div>
                   )}
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
         )}
-
-        {/* Footer hint */}
-        <div className="mt-10 text-xs text-slate-500">
-          API Base: <span className="font-mono">{API_BASE}</span> • Endpoint:{" "}
-          <span className="font-mono">/api/ai/generate-quiz</span>
-        </div>
-      </div>
+      </Card>
     </div>
   );
 }

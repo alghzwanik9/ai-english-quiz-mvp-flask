@@ -1,67 +1,19 @@
-import os, json, re, time, random, hashlib
-from typing import Any, Dict, List, Optional, Tuple
+# backend/routers/ai.py  (أو نفس مسارك)
+import os, json, re, time
+from typing import Any, Dict
+
 from flask import Blueprint, request, jsonify
 import requests
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from services.ollama_client import generate_questions, generate_json, OLLAMA_BASE_URL, OLLAMA_MODEL
 
 from models import db, AiQuestion
 
 bp_ai = Blueprint("ai", __name__, url_prefix="/api/ai")
 
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-OLLAMA_URL = os.getenv("OLLAMA_URL", f"{OLLAMA_BASE_URL}/api/generate")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b-instruct-q4_K_M")
-# نستخدم نفس الفكرة من services/ollama_client.py لكن مع افتراضي مفعّل
-USE_OLLAMA = os.getenv("USE_OLLAMA", "1") == "1"
-
-OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.2"))
-OLLAMA_TOP_P = float(os.getenv("OLLAMA_TOP_P", "0.95"))
-OLLAMA_REPEAT_PENALTY = float(os.getenv("OLLAMA_REPEAT_PENALTY", "1.15"))
-
-
-def extract_json_object(text: str):
-    if not text:
-        raise ValueError("Empty response")
-    t = text.strip()
-    t = re.sub(r"^```(?:json)?\s*", "", t)
-    t = re.sub(r"\s*```$", "", t)
-
-    try:
-        return json.loads(t)
-    except Exception:
-        pass
-
-    m = re.search(r"\{.*\}", t, flags=re.S)
-    if not m:
-        raise ValueError("No JSON object found")
-    return json.loads(m.group(0))
-
-
-def try_ollama_generate(prompt: str, timeout_sec: int = 60) -> dict:
-    """
-    نداء عام على Ollama لإرجاع كائن JSON فيه قائمة questions.
-    لو USE_OLLAMA معطّل نرمي Exception عشان نستخدم الـ fallback.
-    """
-    if not USE_OLLAMA:
-        raise RuntimeError("Ollama disabled via USE_OLLAMA=0")
-
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
-        "options": {
-            "temperature": OLLAMA_TEMPERATURE,
-            "top_p": OLLAMA_TOP_P,
-            "repeat_penalty": OLLAMA_REPEAT_PENALTY,
-        },
-    }
-    r = requests.post(OLLAMA_URL, json=payload, timeout=timeout_sec)
-    r.raise_for_status()
-    text = (r.json().get("response") or "").strip()
-    obj = extract_json_object(text)
-    if not isinstance(obj, dict) or "questions" not in obj:
-        raise ValueError("Invalid JSON format: missing 'questions'")
-    return obj
+# -----------------------------
+# Helpers
+# -----------------------------
 
 
 def build_lesson_prompt(subject: str, lesson_text: str, difficulty: str, n: int) -> str:
@@ -107,10 +59,6 @@ LESSON TEXT:
 
 
 def build_topic_prompt(material: str, topic: str, difficulty: str, n: int) -> str:
-    """
-    برومبت مخصص لحالة المعلّم في الداشبورد:
-    نولّد أسئلة بناءً على اسم المادة وموضوع الدرس بدون نص طويل.
-    """
     material = (material or "General").strip() or "General"
     topic = (topic or material).strip()
     difficulty = (difficulty or "medium").strip().lower()
@@ -148,23 +96,16 @@ Return ONLY valid JSON with the following schema:
 """.strip()
 
 
-def fallback_questions(material: str, topic: str, difficulty: str, n: int):
-    out = []
-    for i in range(n):
-        out.append({
-            "qtype": "mcq",
-            "question": f"[Fallback Q{i+1}] What is the goal of studying {topic or material}?",
-            "choices": ["Understanding", "Memorizing", "Ignoring", "Skipping"],
-            "answer": "Understanding",
-            "explanation": "Learning focuses on understanding."
-        })
-    return {"questions": out}
-
-
 def normalize_questions(payload: dict):
     qs = payload.get("questions") or []
+    if not isinstance(qs, list):
+        qs = []
+
     cleaned = []
     for q in qs:
+        if not isinstance(q, dict):
+            continue
+
         question = (q.get("question") or "").strip()
         choices = q.get("choices") or []
         answer = (q.get("answer") or "").strip()
@@ -172,25 +113,32 @@ def normalize_questions(payload: dict):
 
         if not question:
             continue
+
         if not isinstance(choices, list):
             choices = []
         choices = [str(c).strip() for c in choices if str(c).strip()]
+        # لازم 4 خيارات
         while len(choices) < 4:
-            choices.append(f"خيار {len(choices)+1}")
+            choices.append(f"Option {len(choices)+1}")
         choices = choices[:4]
 
-        if answer in {"A","B","C","D"}:
-            answer = choices[{"A":0,"B":1,"C":2,"D":3}[answer]]
+        # دعم A/B/C/D
+        if answer in {"A", "B", "C", "D"}:
+            answer = choices[{"A": 0, "B": 1, "C": 2, "D": 3}[answer]]
+
         if answer not in choices:
             answer = choices[0]
 
-        cleaned.append({
-            "qtype": "mcq",
-            "question": question,
-            "choices": choices,
-            "answer": answer,
-            "explanation": explanation
-        })
+        cleaned.append(
+            {
+                "qtype": "mcq",
+                "question": question,
+                "choices": choices,
+                "answer": answer,
+                "explanation": explanation,
+            }
+        )
+
     return cleaned
 
 
@@ -208,7 +156,7 @@ def save_questions(material: str, topic: str, difficulty: str, questions: list, 
             answer=q["answer"],
             explanation=q.get("explanation", ""),
             source=source,
-            created_at=now
+            created_at=now,
         )
         db.session.add(row)
         db.session.flush()
@@ -217,53 +165,92 @@ def save_questions(material: str, topic: str, difficulty: str, questions: list, 
     return ids
 
 
+def service_unavailable(msg: str, details: str = ""):
+    payload = {"ok": False, "error": msg}
+    if details:
+        payload["details"] = details
+    return jsonify(payload), 503
+
+
+# -----------------------------
+# Routes
+# -----------------------------
+
 @bp_ai.post("/generate-questions")
+@jwt_required()
 def ai_generate_questions_short():
-    """
-    Endpoint مبسّط يطابق ما يستخدمه TeacherDashboard في الفرونت:
-    material + topic + difficulty + count
-    بدون نص درس كامل.
-    """
-    body = request.get_json(force=True, silent=True) or {}
+    payload = request.get_json(silent=True) or {}
 
-    material = (body.get("material") or body.get("subject") or "General").strip()
-    topic = (body.get("topic") or "").strip() or material
-    difficulty = (body.get("difficulty") or "medium").strip().lower()
-    count = int(body.get("count") or body.get("num_questions") or 5)
-    count = max(1, min(count, 30))
+    material = (payload.get("material") or "English").strip()
+    topic = (payload.get("topic") or "").strip()
+    difficulty = (payload.get("difficulty") or "easy").strip()
+    count = int(payload.get("count") or 5)
 
-    # نحاول مع Ollama، لو فشل نستخدم fallback
-    used_source = "fallback"
-    try:
-        prompt = build_topic_prompt(material, topic, difficulty, count)
-        payload = try_ollama_generate(prompt)
-        questions = normalize_questions(payload)
-        if not questions:
-            raise ValueError("No questions returned")
-        used_source = "ollama"
-    except Exception:
-        questions = normalize_questions(
-            fallback_questions(material, topic, difficulty, count)
-        )
+    user_id = get_jwt_identity()
+
+    # ✅ هنا: استدعاء Ollama عندك لازم يرجّع "قائمة" dicts
+    # مثال الشكل المطلوب:
+    # generated = [
+    #   {"qtype":"mcq","question":"...","choices":[...],"answer":"...","explanation":"..."},
+    # ]
+    generated = generate_questions(material, topic, difficulty, count)
+    print("generated type:", type(generated), "len:", len(generated))
+    # print("first item:", generated[0] if generated else None)  # debug only
 
     saved_ids = []
-    try:
-        saved_ids = save_questions(material, topic, difficulty, questions, used_source)
-    except Exception:
-        saved_ids = []
+    for item in generated:
+        row = AiQuestion(
+            created_by_user_id=user_id,
+            material=material,
+            topic=topic,
+            difficulty=difficulty,
+            qtype=item.get("qtype", "mcq"),
+            question=item["question"],
+            choices_json=json.dumps(item.get("choices", []), ensure_ascii=False),
+            answer=item["answer"],
+            explanation=item.get("explanation"),
+            source="ollama",
+            created_at=int(time.time()),
+        )
+        db.session.add(row)
+        db.session.flush()
+        saved_ids.append(row.id)
 
-    return jsonify(
-        {
-            "ok": True,
-            "source": used_source,
-            "saved_ids": saved_ids,
-            "questions": questions,
-        }
-    )
+    db.session.commit()
+    return jsonify(ok=True, saved_ids=saved_ids, count=len(saved_ids))
+
+@bp_ai.post("/ollama")
+@jwt_required()
+def ai_ollama():
+
+    payload = request.get_json(silent=True) or {}
+    prompt = (payload.get("prompt") or "").strip()
+    if not prompt:
+        return jsonify({"ok": False, "error": "prompt is required"}), 400
+
+    try:
+        r = requests.post(
+            f"{OLLAMA_BASE_URL}/api/generate",
+            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+            timeout=90,
+        )
+        r.raise_for_status()
+        data = r.json()
+        return jsonify({"ok": True, "output": (data.get("response") or "").strip()})
+    except requests.RequestException as e:
+        return jsonify({"ok": False, "error": f"Ollama request failed: {str(e)}"}), 502
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @bp_ai.post("/generate-quiz")
+@jwt_required()
 def ai_generate_quiz_from_text():
+    """
+    Clean API:
+    - إذا Ollama فشل => 503 (بدون fallback)
+    - يحفظ في DB فقط عند النجاح (إذا save=true)
+    """
     body = request.get_json(force=True, silent=True) or {}
 
     subject = (body.get("subject") or body.get("material") or "General").strip()
@@ -279,34 +266,31 @@ def ai_generate_quiz_from_text():
     if not lesson_text:
         return jsonify({"ok": False, "error": "text (lesson_text) is required"}), 400
 
-    prompt = build_lesson_prompt(subject, lesson_text, difficulty, count)
-
-    used_source = "fallback"
     try:
-        payload = try_ollama_generate(prompt)
+        prompt = build_lesson_prompt(subject, lesson_text, difficulty, count)
+        payload = generate_json(prompt)
+        if not isinstance(payload, dict):
+            raise ValueError("Ollama returned a list instead of a JSON object")
+
         questions = normalize_questions(payload)
         if not questions:
-            raise ValueError("No questions returned")
+            return jsonify({"ok": False, "error": "No questions returned from AI"}), 502
+
         used_source = "ollama"
-    except Exception:
-        questions = normalize_questions(fallback_questions(subject, "From lesson text", difficulty, count))
-
-    saved_ids = []
-    if save:
-        try:
+        saved_ids = []
+        if save:
             saved_ids = save_questions(subject, "From lesson text", difficulty, questions, used_source)
-        except Exception:
-            saved_ids = []
 
-    return jsonify({
-        "ok": True,
-        "source": used_source,
-        "saved_ids": saved_ids,
-        "questions": questions
-    })
+        return jsonify(
+            {"ok": True, "source": used_source, "saved_ids": saved_ids, "questions": questions}
+        )
+
+    except Exception as e:
+        return service_unavailable("AI generation failed (Ollama).", str(e))
 
 
 @bp_ai.get("/questions")
+@jwt_required()
 def list_saved_questions():
     material = (request.args.get("material") or "").strip()
     limit = int(request.args.get("limit") or 50)
@@ -320,24 +304,27 @@ def list_saved_questions():
 
     out = []
     for r in rows:
-        out.append({
-            "id": r.id,
-            "material": r.material,
-            "topic": r.topic,
-            "difficulty": r.difficulty,
-            "qtype": r.qtype,
-            "question": r.question,
-            "choices": json.loads(r.choices_json or "[]"),
-            "answer": r.answer,
-            "explanation": r.explanation,
-            "source": r.source,
-            "created_at": r.created_at,
-        })
+        out.append(
+            {
+                "id": r.id,
+                "material": r.material,
+                "topic": r.topic,
+                "difficulty": r.difficulty,
+                "qtype": r.qtype,
+                "question": r.question,
+                "choices": json.loads(r.choices_json or "[]"),
+                "answer": r.answer,
+                "explanation": r.explanation,
+                "source": r.source,
+                "created_at": r.created_at,
+            }
+        )
 
     return jsonify({"ok": True, "items": out})
 
 
 @bp_ai.post("/summarize")
+@jwt_required()
 def summarize_text():
     body = request.get_json(force=True, silent=True) or {}
     text = (body.get("text") or "").strip()
@@ -348,30 +335,29 @@ def summarize_text():
 You are a helpful study assistant.
 Summarize the following text for a student in clear, short bullet points.
 
+Return ONLY JSON like:
+{{"summary": "..." }}
+
 TEXT:
 \"\"\"{text}\"\"\"
 """.strip()
 
-    used_source = "fallback"
-    summary = ""
     try:
-        payload = try_ollama_generate(prompt)
-        # نتوقع أن الـ model يرجع {"summary": "..."} أو {"text": "..."} أو {"questions":[...]} لكن هنا نركز على ملخص
-        summary = (
-            (payload.get("summary") or "").strip()
-            or (payload.get("text") or "").strip()
-        )
+        payload = generate_json(prompt)
+        if not isinstance(payload, dict):
+            raise ValueError("Ollama returned a list instead of a JSON object")
+        summary = ((payload.get("summary") or "").strip() or (payload.get("text") or "").strip())
         if not summary:
-            raise ValueError("Empty summary")
-        used_source = "ollama"
-    except Exception:
-        # fallback بسيط جداً
-        summary = "• هذا ملخص افتراضي.\n• فعّل Ollama للحصول على تلخيصات حقيقية."
+            return jsonify({"ok": False, "error": "Empty summary from AI"}), 502
 
-    return jsonify({"ok": True, "source": used_source, "summary": summary})
+        return jsonify({"ok": True, "source": "ollama", "summary": summary})
+
+    except Exception as e:
+        return service_unavailable("AI summarize failed (Ollama).", str(e))
 
 
 @bp_ai.post("/learning-resources")
+@jwt_required()
 def learning_resources():
     body = request.get_json(force=True, silent=True) or {}
     subject = (body.get("subject") or "General").strip()
@@ -384,44 +370,43 @@ You are a tutor helping a student learn.
 Subject: {subject}
 Topic: {topic}
 
-Return JSON with:
+Return ONLY JSON with:
 {{
   "outline": "short outline",
-  "points": ["bullet 1", "bullet 2", "..."],
+  "points": ["bullet 1", "bullet 2"],
   "examples": ["example 1", "example 2"],
   "video_ideas": ["search phrase 1", "search phrase 2"]
 }}
 """.strip()
 
-    used_source = "fallback"
-    outline = ""
-    points = []
-    examples = []
-    video_ideas = []
-
     try:
-        payload = try_ollama_generate(prompt)
+        payload = generate_json(prompt)
+        if not isinstance(payload, dict):
+            raise ValueError("Ollama returned a list instead of a JSON object")
+
         outline = (payload.get("outline") or "").strip()
         points = payload.get("points") or []
         examples = payload.get("examples") or []
         video_ideas = payload.get("video_ideas") or []
-        used_source = "ollama"
-    except Exception:
-        outline = f"High level overview about {topic} in {subject}."
-        points = [
-            f"Understand the basic idea of {topic}.",
-            f"See 2–3 simple examples related to {subject}.",
-        ]
-        examples = [f"Example sentence or situation using {topic}."]
-        video_ideas = [f"{subject} {topic} explanation for beginners"]
 
-    return jsonify(
-        {
-            "ok": True,
-            "source": used_source,
-            "outline": outline,
-            "points": points,
-            "examples": examples,
-            "video_ideas": video_ideas,
-        }
-    )
+        # تنظيف بسيط
+        if not isinstance(points, list):
+            points = []
+        if not isinstance(examples, list):
+            examples = []
+        if not isinstance(video_ideas, list):
+            video_ideas = []
+
+        return jsonify(
+            {
+                "ok": True,
+                "source": "ollama",
+                "outline": outline,
+                "points": points,
+                "examples": examples,
+                "video_ideas": video_ideas,
+            }
+        )
+
+    except Exception as e:
+        return service_unavailable("AI learning-resources failed (Ollama).", str(e))

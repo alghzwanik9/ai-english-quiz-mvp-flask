@@ -1,110 +1,36 @@
-import { cn } from "../ui/cn";
+import React from "react";
+import { Menu, LogOut, Bell } from "lucide-react";
+import { logout } from "../services/authService";
+import { useNavigate } from "react-router-dom";
 
-export default function Header({
-  title = "Dashboard",
-  lang = "en",
-  isRtl = false,
-  onToggleLang,
-  onOpenMobileMenu,
-  user = { name: "Teacher" },
-  onLogout,
-  cta,
-}) {
+export default function Header({ onOpenSidebar }) {
+  const nav = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    nav("/login");
+  };
+
   return (
-    <header className="sticky top-0 z-30">
-      <div className="border-b border-slate-200/60 bg-white/70 backdrop-blur-xl">
-        <div className="px-4 lg:px-6 py-4">
-          {/* ✅ نقلب توزيع الجهتين بالكامل في RTL */}
-          <div
-            className={cn(
-              "flex items-center justify-between gap-3",
-              isRtl && "flex-row-reverse"
-            )}
-          >
-            {/* Side A: menu + title */}
-            <div
-              className={cn(
-                "flex items-center gap-3 min-w-0 flex-1",
-                // ✅ داخل Side A: نخلي زر الثلاث خطوط يصير يمين النص في RTL
-                isRtl ? "justify-end flex-row-reverse" : "justify-start"
-              )}
-            >
-              <button
-                type="button"
-                onClick={onOpenMobileMenu}
-                className="grid place-items-center h-10 w-10 rounded-xl border border-slate-200/70 bg-white/80 hover:bg-white transition shrink-0"
-                aria-label="Open menu"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M4 7h16M4 12h16M4 17h16"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
+    <header className="sticky top-0 z-30 flex h-20 items-center justify-between bg-white/80 backdrop-blur-md px-6 border-b border-black/10">
+      <button className="lg:hidden p-2 text-black hover:bg-zinc-100 rounded-xl transition-colors" onClick={onOpenSidebar}>
+        <Menu size={24} />
+      </button>
 
-              <div
-                className={cn(
-                  "min-w-0 flex flex-col",
-                  isRtl ? "text-right items-end" : "text-left items-start"
-                )}
-              >
-                <div className="text-xl font-extrabold text-slate-900 truncate">
-                  {title}
-                </div>
-                <div className="text-sm text-slate-500 truncate">
-                  AI-powered learning dashboard
-                </div>
-              </div>
-            </div>
-
-            {/* Side B: actions (بتصير يسار تلقائياً بسبب flex-row-reverse فوق) */}
-            <div className="flex items-center gap-2 lg:gap-3">
-              {cta?.label && (
-                <button
-                  type="button"
-                  onClick={cta.onClick}
-                  className="h-10 px-4 rounded-xl border border-slate-200/70 bg-white/90 hover:bg-white shadow-sm transition font-semibold text-slate-900"
-                >
-                  {cta.label}
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={onToggleLang}
-                className={cn(
-                  "h-10 px-3 rounded-xl border border-slate-200/70 bg-white/90 hover:bg-white shadow-sm transition",
-                  "font-semibold text-slate-900"
-                )}
-                aria-label="Toggle language"
-                title="Toggle language"
-              >
-                {lang === "ar" ? "AR" : "EN"}
-              </button>
-
-              <div className="hidden sm:flex items-center gap-2 px-3 h-10 rounded-xl border border-slate-200/70 bg-white/90 shadow-sm">
-                <div className="h-7 w-7 rounded-full bg-slate-200" />
-                <div className={cn("leading-4", isRtl ? "text-right" : "text-left")}>
-                  <div className="text-sm font-semibold text-slate-900">
-                    {user?.name || "User"}
-                  </div>
-                  <div className="text-xs text-slate-500">Signed in</div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={onLogout}
-                className="h-10 px-4 rounded-xl border border-slate-200/70 bg-white/90 hover:bg-white shadow-sm transition font-semibold text-slate-900"
-              >
-                Logout
-              </button>
-            </div>
+      <div className="flex items-center gap-4 ml-auto">
+        <button className="p-2.5 text-zinc-400 hover:text-black hover:bg-zinc-50 rounded-xl transition-all">
+          <Bell size={20} />
+        </button>
+        <div className="h-8 w-[1px] bg-black/5 mx-2" />
+        <button 
+          onClick={handleLogout}
+          className="flex items-center gap-2 pl-2 pr-4 py-2 rounded-xl text-sm font-black text-rose-600 hover:bg-rose-50 transition-all border border-transparent hover:border-rose-100"
+        >
+          <div className="w-8 h-8 rounded-lg bg-rose-50 flex items-center justify-center">
+            <LogOut size={16} />
           </div>
-        </div>
+          Logout
+        </button>
       </div>
     </header>
   );

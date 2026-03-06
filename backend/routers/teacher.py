@@ -1,14 +1,16 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
+from sqlalchemy import func, distinct
+import json
+import time
 
 from authz import teacher_required
-from models import db, Test, Question, Choice, Attempt
+from models import db, User, Test, Question, Choice, TestAttempt, AiQuestion, TestAiQuestion
+
 from routers.ai import (
     build_lesson_prompt,
     try_ollama_generate,
-    fallback_questions,
     normalize_questions,
-    save_questions,
 )
 
 bp_teacher = Blueprint("teacher", __name__, url_prefix="/api/teacher")
@@ -21,7 +23,6 @@ def serialize_test(test: Test, include_questions: bool = True):
         "subject": test.subject,
         "difficulty": test.difficulty,
         "created_at": test.created_at.isoformat() if test.created_at else None,
-        # ✅ مفيد للمعلم عشان ينسخ رابط الاختبار
         "public_token": test.public_token,
     }
 
@@ -35,7 +36,7 @@ def serialize_test(test: Test, include_questions: bool = True):
                     "qtype": "mcq",
                     "question": q.question,
                     "choices": choices,
-                    "answer": q.answer,  # المعلم يشوفها عادي
+                    "answer": q.answer,
                     "explanation": q.explanation or "",
                 }
             )
@@ -45,30 +46,89 @@ def serialize_test(test: Test, include_questions: bool = True):
     return data
 
 
+def _teacher_id():
+    return int(get_jwt_identity())
+
+
+def _fmt_created_at(v):
+    # TestAttempt.created_at عندك integer epoch
+    return v
+
+
+@bp_teacher.get("/stats")
+@teacher_required
+def teacher_stats():
+    teacher_id = _teacher_id()
+
+    # 1) عدد الاختبارات
+    total_tests = (
+        db.session.query(func.count(Test.id))
+        .filter(Test.teacher_id == teacher_id)
+        .scalar()
+        or 0
+    )
+
+    # 2) عدد المحاولات (كل محاولات طلاب هذا المعلم)
+    total_attempts = (
+        db.session.query(func.count(TestAttempt.id))
+        .join(Test, Test.id == TestAttempt.test_id)
+        .filter(Test.teacher_id == teacher_id)
+        .scalar()
+        or 0
+    )
+
+    # 3) متوسط النسبة
+    avg_percent = (
+        db.session.query(func.avg(TestAttempt.percent))
+        .join(Test, Test.id == TestAttempt.test_id)
+        .filter(Test.teacher_id == teacher_id)
+        .scalar()
+    )
+    avg_percent = round(float(avg_percent), 1) if avg_percent else 0
+
+    # 4) عدد الطلاب النشطين (طلاب مختلفين لهم محاولات)
+    active_students = (
+        db.session.query(func.count(distinct(TestAttempt.student_id)))
+        .join(Test, Test.id == TestAttempt.test_id)
+        .filter(Test.teacher_id == teacher_id)
+        .scalar()
+        or 0
+    )
+
+    return jsonify({
+        "ok": True,
+        "total_tests": total_tests,
+        "total_attempts": total_attempts,
+        "avg_percent": avg_percent,
+        "active_students": active_students,
+    })
+
 @bp_teacher.get("/tests/<int:test_id>/results")
 @teacher_required
 def test_results(test_id: int):
-    teacher_id = get_jwt_identity()
+    teacher_id = _teacher_id()
 
     test = Test.query.filter_by(id=test_id, teacher_id=teacher_id).first_or_404()
 
+    # ✅ نتائج من test_attempts (الجديد)
     rows = (
-        Attempt.query
-        .filter_by(teacher_id=teacher_id, test_id=test.id)
-        .order_by(Attempt.created_at.desc())
+        db.session.query(TestAttempt, User)
+        .join(User, User.id == TestAttempt.student_id)
+        .filter(TestAttempt.test_id == test.id)
+        .order_by(TestAttempt.id.desc())
         .all()
     )
 
     items = []
-    for a in rows:
+    for att, stu in rows:
         items.append({
-            "id": a.id,
-            "student_name": a.student_name or "",
-            "student_email": a.student_email or "",
-            "score": a.score,
-            "total": a.total,
-            "percent": a.percent,
-            "created_at": a.created_at.isoformat() if a.created_at else None,
+            "id": att.id,
+            "student_name": getattr(stu, "name", "") or "",
+            "student_email": getattr(stu, "email", "") or "",
+            "score": att.score,
+            "total": att.total,
+            "percent": att.percent,
+            "created_at": _fmt_created_at(att.created_at),
         })
 
     return jsonify({"ok": True, "test": {"id": test.id, "name": test.name}, "items": items})
@@ -77,27 +137,31 @@ def test_results(test_id: int):
 @bp_teacher.get("/results")
 @teacher_required
 def teacher_results():
-    teacher_id = get_jwt_identity()
+    teacher_id = _teacher_id()
 
+    # ✅ كل محاولات طلاب المعلم على اختبارات المعلم
     rows = (
-        Attempt.query
-        .filter_by(teacher_id=teacher_id)
-        .order_by(Attempt.created_at.desc())
-        .limit(200)
+        db.session.query(TestAttempt, User, Test)
+        .join(Test, Test.id == TestAttempt.test_id)
+        .join(User, User.id == TestAttempt.student_id)
+        .filter(Test.teacher_id == teacher_id)
+        .order_by(TestAttempt.id.desc())
+        .limit(500)
         .all()
     )
 
     items = []
-    for a in rows:
+    for att, stu, test in rows:
         items.append({
-            "id": a.id,
-            "test_id": a.test_id,
-            "student_name": a.student_name or "",
-            "student_email": a.student_email or "",
-            "score": a.score,
-            "total": a.total,
-            "percent": a.percent,
-            "created_at": a.created_at.isoformat() if a.created_at else None,
+            "id": att.id,
+            "test_id": test.id,
+            "test_name": test.name,
+            "student_name": getattr(stu, "name", "") or "",
+            "student_email": getattr(stu, "email", "") or "",
+            "score": att.score,
+            "total": att.total,
+            "percent": att.percent,
+            "created_at": _fmt_created_at(att.created_at),
         })
 
     return jsonify({"ok": True, "items": items})
@@ -106,7 +170,7 @@ def teacher_results():
 @bp_teacher.get("/tests")
 @teacher_required
 def list_tests():
-    teacher_id = get_jwt_identity()
+    teacher_id = _teacher_id()
 
     tests = (
         Test.query
@@ -122,7 +186,7 @@ def list_tests():
 @bp_teacher.get("/tests/<int:test_id>")
 @teacher_required
 def get_test(test_id: int):
-    teacher_id = get_jwt_identity()
+    teacher_id = _teacher_id()
 
     test = (
         Test.query
@@ -136,23 +200,6 @@ def get_test(test_id: int):
 @bp_teacher.post("/tests")
 @teacher_required
 def create_test():
-    """
-    إنشاء اختبار جديد مع أسئلة متعددة الاختيارات.
-    متوقَّع body بالشكل:
-    {
-      "name": "...",
-      "subject": "...",
-      "difficulty": "easy|medium|hard",
-      "questions": [
-        {
-          "question": "...",
-          "choices": ["...","...","...","..."],
-          "answer": "...",
-          "explanation": "..."
-        }
-      ]
-    }
-    """
     body = request.get_json(silent=True) or {}
 
     name = (body.get("name") or "").strip()
@@ -163,11 +210,10 @@ def create_test():
     if not name:
         return jsonify({"ok": False, "error": "name is required"}), 400
 
-    if not isinstance(questions, list) or not questions:
-        return jsonify({"ok": False, "error": "questions must be a non-empty list"}), 400
+    if not isinstance(questions, list):
+        return jsonify({"ok": False, "error": "questions must be a list"}), 400
 
-    # ✅ لازم نخزن teacher_id في جدول tests
-    teacher_id = get_jwt_identity()
+    teacher_id = _teacher_id()
 
     test = Test(
         teacher_id=teacher_id,
@@ -211,7 +257,6 @@ def create_test():
 
     db.session.commit()
 
-    # ✅ رجّع التوكن عشان المعلّم يشارك الرابط
     return jsonify({
         "ok": True,
         "item": serialize_test(test, include_questions=True),
@@ -223,16 +268,7 @@ def create_test():
 @teacher_required
 def import_questions():
     """
-    استيراد أسئلة من نص مادة/درس (بدون التعامل مع الملفات حالياً).
-    يستخدم نفس منطق /api/ai/generate-quiz لكنه موجه للمعلم.
-    body المتوقع:
-    {
-      "material": "...",
-      "text": "...",
-      "difficulty": "easy|medium|hard",
-      "count": 10,
-      "save": true/false
-    }
+    يولّد أسئلة بالـ AI ويحفظها في DB ويرجعها للمعلم.
     """
     body = request.get_json(force=True, silent=True) or {}
 
@@ -242,40 +278,98 @@ def import_questions():
     count = int(body.get("count") or body.get("num_questions") or 5)
     count = max(1, min(count, 30))
 
-    save_flag = body.get("save", True)
-    if isinstance(save_flag, str):
-        save_flag = save_flag.strip().lower() not in ("0", "false", "no")
-
     if not lesson_text:
         return jsonify({"ok": False, "error": "text is required"}), 400
 
     prompt = build_lesson_prompt(material, lesson_text, difficulty, count)
 
-    used_source = "fallback"
     try:
         payload = try_ollama_generate(prompt)
         questions = normalize_questions(payload)
         if not questions:
-            raise ValueError("No questions returned")
-        used_source = "ollama"
-    except Exception:
-        questions = normalize_questions(
-            fallback_questions(material, "From import", difficulty, count)
-        )
+            return jsonify({"ok": False, "error": "No questions returned from AI"}), 502
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "error": "AI generation failed (Ollama).",
+            "details": str(e),
+        }), 503
 
-    # ✅ حفظ بنك الأسئلة (ملاحظة: الأفضل تمرير teacher_id هنا لاحقًا)
+    # ✅ حفظ الأسئلة في ai_questions
+    teacher_id = _teacher_id()
+    now = int(time.time())
     saved_ids = []
-    if save_flag:
-        try:
-            saved_ids = save_questions(material, "From import", difficulty, questions, used_source)
-        except Exception:
-            saved_ids = []
+    for q in questions:
+        row = AiQuestion(
+            created_by_user_id=teacher_id,
+            material=material,
+            topic="From lesson text",
+            difficulty=difficulty,
+            qtype=q.get("qtype", "mcq"),
+            question=q["question"],
+            choices_json=json.dumps(q.get("choices", []), ensure_ascii=False),
+            answer=q["answer"],
+            explanation=q.get("explanation", ""),
+            source="ollama",
+            created_at=now,
+        )
+        db.session.add(row)
+        db.session.flush()
+        saved_ids.append(row.id)
 
-    return jsonify(
-        {
-            "ok": True,
-            "source": used_source,
-            "saved_ids": saved_ids,
-            "questions": questions,
-        }
-    )
+    db.session.commit()
+
+    return jsonify({
+        "ok": True,
+        "source": "ollama",
+        "saved_ids": saved_ids,
+        "questions": questions,
+    })
+
+
+@bp_teacher.post("/tests/<int:test_id>/ai-questions")
+@teacher_required
+def link_ai_questions_to_test(test_id: int):
+    """
+    ربط أسئلة AI (من ai_questions) باختبار معيّن.
+    Body: { "ai_question_ids": [1, 2, 3] }
+    """
+    teacher_id = _teacher_id()
+
+    test = Test.query.filter_by(id=test_id, teacher_id=teacher_id).first_or_404()
+
+    body = request.get_json(silent=True) or {}
+    ids = body.get("ai_question_ids") or []
+
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"ok": False, "error": "ai_question_ids must be a non-empty list"}), 400
+
+    linked = []
+    skipped = []
+    for ai_id in ids:
+        # تأكد السؤال موجود
+        aq = db.session.get(AiQuestion, ai_id)
+        if not aq:
+            skipped.append(ai_id)
+            continue
+
+        # تجنب التكرار (UNIQUE constraint)
+        exists = TestAiQuestion.query.filter_by(
+            test_id=test.id, ai_question_id=ai_id
+        ).first()
+        if exists:
+            skipped.append(ai_id)
+            continue
+
+        link = TestAiQuestion(test_id=test.id, ai_question_id=ai_id)
+        db.session.add(link)
+        linked.append(ai_id)
+
+    db.session.commit()
+
+    return jsonify({
+        "ok": True,
+        "linked": linked,
+        "skipped": skipped,
+        "test_id": test.id,
+    })

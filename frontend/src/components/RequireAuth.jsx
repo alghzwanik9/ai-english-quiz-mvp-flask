@@ -8,21 +8,16 @@ export default function RequireAuth({ role, children }) {
 
   const token = getToken();
   const user = getUser();
+  const userRole = user?.role;
 
-  // لازم يكون فيه token + user
-  if (!token || !user) {
+  // ✅ لازم token + role (مو بس user)
+  if (!token || !userRole) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
   // تحقق الدور لو مطلوب
-  if (role && user.role !== role) {
-    // لو دخل صفحة غلط حسب دوره، وجهه للصح
-    return (
-      <Navigate
-        to={user.role === "teacher" ? "/teacher" : "/student"}
-        replace
-      />
-    );
+  if (role && userRole !== role) {
+    return <Navigate to={userRole === "teacher" ? "/teacher" : "/student"} replace />;
   }
 
   return children;

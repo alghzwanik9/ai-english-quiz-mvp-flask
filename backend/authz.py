@@ -1,24 +1,28 @@
+# backend/authz.py
+from __future__ import annotations
+
 from functools import wraps
+from typing import Callable, Any
+
 from flask import jsonify
-from flask_jwt_extended import jwt_required, get_jwt
+from flask_jwt_extended import jwt_required, get_jwt_identity
 
-def teacher_required(fn):
+from models import db, User
+
+
+def teacher_required(fn: Callable[..., Any]) -> Callable[..., Any]:
     @wraps(fn)
     @jwt_required()
     def wrapper(*args, **kwargs):
-        claims = get_jwt()
-        if claims.get("role") != "teacher":
-            return jsonify({"error": "Teacher only"}), 403
-        return fn(*args, **kwargs)
-    return wrapper
+        user_id = get_jwt_identity()
 
+        user = db.session.get(User, user_id)
+        if not user:
+            return jsonify({"ok": False, "error": "Invalid user"}), 401
 
-def admin_required(fn):
-    @wraps(fn)
-    @jwt_required()
-    def wrapper(*args, **kwargs):
-        claims = get_jwt()
-        if claims.get("role") != "admin":
-            return jsonify({"error": "Admin only"}), 403
+        if user.role != "teacher":
+            return jsonify({"ok": False, "error": "Teacher only"}), 403
+
         return fn(*args, **kwargs)
+
     return wrapper

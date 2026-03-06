@@ -1,4 +1,16 @@
+// frontend/src/services/authService.js
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+
+const SESSION_KEY = "session_user";
+const LEGACY_KEYS = { token: "token", user: "user", role: "role" };
+
+function safeJsonParse(raw, fallback = null) {
+  try {
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 function pickToken(data) {
   return (
@@ -10,6 +22,34 @@ function pickToken(data) {
   );
 }
 
+function readSession() {
+  return safeJsonParse(localStorage.getItem(SESSION_KEY), null);
+}
+
+function writeSession(session) {
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+}
+
+function clearLegacy() {
+  localStorage.removeItem(LEGACY_KEYS.token);
+  localStorage.removeItem(LEGACY_KEYS.user);
+  localStorage.removeItem(LEGACY_KEYS.role);
+}
+
+function migrateLegacyIfNeeded() {
+  const current = readSession();
+  if (current?.token) return;
+
+  const legacyToken = localStorage.getItem(LEGACY_KEYS.token);
+  const legacyUser = safeJsonParse(localStorage.getItem(LEGACY_KEYS.user), null);
+  const legacyRole = localStorage.getItem(LEGACY_KEYS.role) || legacyUser?.role || null;
+
+  if (legacyToken && legacyToken !== "undefined" && legacyToken !== "null") {
+    writeSession({ token: legacyToken, user: legacyUser, role: legacyRole });
+    clearLegacy();
+  }
+}
+
 function persistAuth(data) {
   const token = pickToken(data);
   const user = data?.user || null;
@@ -17,10 +57,8 @@ function persistAuth(data) {
 
   if (!token) throw new Error("Login succeeded but token is missing in response");
 
-  localStorage.setItem("token", token);
-  localStorage.setItem("user", JSON.stringify(user));
-  if (role) localStorage.setItem("role", role);
-
+  writeSession({ token, user, role });
+  clearLegacy();
   return { token, user, role };
 }
 
@@ -32,10 +70,7 @@ export async function login(email, password) {
   });
 
   const data = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    throw new Error(data?.error || data?.message || "Login failed");
-  }
+  if (!res.ok) throw new Error(data?.error || data?.message || "Login failed");
 
   persistAuth(data);
   return data.user;
@@ -49,37 +84,38 @@ export async function register({ name, email, password, role = "student" }) {
   });
 
   const data = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    throw new Error(data?.error || data?.message || "Register failed");
-  }
+  if (!res.ok) throw new Error(data?.error || data?.message || "Register failed");
 
   persistAuth(data);
   return data.user;
 }
 
 export function logout() {
-  localStorage.removeItem("token");
-  localStorage.removeItem("user");
-  localStorage.removeItem("role");
+  // امسح الجلسة الحالية
+  localStorage.removeItem(SESSION_KEY);
+
+  // امسح أي بيانات قديمة
+  clearLegacy();
+
+  // (اختياري لكن مفيد)
+  return true;
 }
+
 
 export function getToken() {
-  const t = localStorage.getItem("token");
-  // حماية ضد "undefined" و "null" كنص
-  if (!t || t === "undefined" || t === "null") return null;
-  return t;
+  migrateLegacyIfNeeded();
+  const session = readSession();
+  return session?.token || null;
 }
 
+
+
 export function getUser() {
-  try {
-    const raw = localStorage.getItem("user");
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+  migrateLegacyIfNeeded();
+  return readSession()?.user || null;
 }
 
 export function getRole() {
-  return localStorage.getItem("role") || getUser()?.role || null;
+  migrateLegacyIfNeeded();
+  return readSession()?.role || readSession()?.user?.role || null;
 }

@@ -3,22 +3,31 @@ import { cn } from "./cn";
 export default function Card({
   className = "",
   children,
+  title,
   variant = "default", // default | glass
 }) {
   const variants = {
-    default: "rounded-2xl bg-white shadow-sm border border-slate-100",
-    glass:
-      "rounded-2xl border border-slate-200/60 bg-white/70 backdrop-blur-xl shadow-xl shadow-slate-900/5",
+    default: "glass-card overflow-hidden",
+    glass: "glass-card overflow-hidden",
   };
 
-  return <div className={cn(variants[variant], className)}>{children}</div>;
+  return (
+    <div className={cn(variants[variant], className)}>
+      {title && (
+        <div className="px-6 py-4 border-b border-white/5 bg-white/[0.02]">
+          <h3 className="text-white font-bold tracking-tight">{title}</h3>
+        </div>
+      )}
+      {children}
+    </div>
+  );
 }
 
 export function CardHeader({ className = "", children, compact = false }) {
   return (
     <div
       className={cn(
-        compact ? "px-5 py-4 border-b border-slate-200/60" : "px-6 pt-6",
+        compact ? "px-6 py-4 border-b border-white/10" : "px-6 pt-6",
         className
       )}
     >
@@ -28,16 +37,16 @@ export function CardHeader({ className = "", children, compact = false }) {
 }
 
 export function CardTitle({ className = "", children }) {
-  return <h3 className={cn("text-slate-900 font-bold", className)}>{children}</h3>;
+  return <h3 className={cn("text-white font-bold text-lg", className)}>{children}</h3>;
 }
 
 export function CardDesc({ className = "", children }) {
-  return <p className={cn("text-slate-600 text-sm mt-1", className)}>{children}</p>;
+  return <p className={cn("text-slate-400 text-sm mt-1", className)}>{children}</p>;
 }
 
 export function CardContent({ className = "", children, compact = false }) {
   return (
-    <div className={cn(compact ? "px-5 py-5" : "px-6 pb-6 pt-4", className)}>
+    <div className={cn(compact ? "px-6 py-6" : "px-6 pb-6 pt-4", className)}>
       {children}
     </div>
   );

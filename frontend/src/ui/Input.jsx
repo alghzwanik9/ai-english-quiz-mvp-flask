@@ -1,14 +1,28 @@
-import React from "react";
+import { cn } from "./cn";
 
-export default function Input({ className = "", ...props }) {
+export default function Input({ label, className = "", containerClassName = "", id, as: Component = "input", ...props }) {
+  const inputId = id || (label ? `input-${label.replace(/\s+/g, '-').toLowerCase()}` : undefined);
+  
   return (
-    <input
-      {...props}
-      className={
-        "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 outline-none " +
-        "focus:ring-2 focus:ring-slate-200 disabled:opacity-60 disabled:cursor-not-allowed " +
-        className
-      }
-    />
+    <div className={cn("space-y-2", containerClassName)}>
+      {label && (
+        <label htmlFor={inputId} className="label-premium">
+          {label}
+        </label>
+      )}
+      {Component === "textarea" ? (
+        <textarea
+          id={inputId}
+          {...(props)}
+          className={cn("input-premium min-h-[100px]", className)}
+        />
+      ) : (
+        <input
+          id={inputId}
+          {...props}
+          className={cn("input-premium", className)}
+        />
+      )}
+    </div>
   );
 }

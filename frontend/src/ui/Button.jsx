@@ -10,19 +10,19 @@ export default function Button({
   ...props
 }) {
   const base =
-    "inline-flex items-center justify-center rounded-xl font-semibold transition " +
-    "focus:outline-none focus:ring-2 focus:ring-slate-200 " +
-    "disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none";
+    "inline-flex items-center justify-center rounded-xl font-medium transition-all duration-300 " +
+    "focus:outline-none focus:ring-2 focus:ring-indigo-500/50 " +
+    "active:scale-95 disabled:opacity-50 disabled:pointer-events-none";
 
   const variants = {
-    default: "bg-slate-900 text-white hover:bg-slate-800",
-    outline: "border border-slate-200/70 bg-white/90 text-slate-900 hover:bg-white",
-    ghost: "bg-transparent text-slate-900 hover:bg-slate-100",
+    default: "bg-indigo-600 text-white shadow-[0_0_20px_rgba(79,70,229,0.3)] hover:shadow-[0_0_25px_rgba(79,70,229,0.5)] hover:bg-indigo-500",
+    outline: "border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white backdrop-blur-sm",
+    ghost: "bg-transparent text-slate-400 hover:bg-white/5 hover:text-white",
   };
 
   const sizes = {
-    md: "h-10 px-4 text-sm",
-    sm: "h-9 px-3 text-sm",
+    md: "h-11 px-6 text-sm",
+    sm: "h-9 px-4 text-xs",
   };
 
   return (

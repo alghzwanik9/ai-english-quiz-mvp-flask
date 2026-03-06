@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify
-
-from services.ollama_client import ollama_health
+from services.ollama_client import (
+    OLLAMA_MODEL, USE_OLLAMA, OLLAMA_URL, OLLAMA_BASE_URL, ollama_health
+)
 
 bp_ai_health = Blueprint("ai_health", __name__, url_prefix="/api/ai")
 
@@ -10,17 +11,6 @@ def ai_health():
     """
     فحص سريع لحالة خادم Ollama.
     """
-    return jsonify({"ok": ollama_health()})
-
-from flask import Blueprint, jsonify
-from services.ollama_client import (
-    OLLAMA_MODEL, USE_OLLAMA, OLLAMA_URL, OLLAMA_BASE_URL, ollama_health
-)
-
-bp_ai_health = Blueprint("ai_health", __name__, url_prefix="/api/ai")
-
-@bp_ai_health.get("/health")
-def ai_health():
     ok = ollama_health() if USE_OLLAMA else False
     return jsonify({
         "status": "ok",
@@ -28,5 +18,5 @@ def ai_health():
         "ollama_ok": ok,
         "ollama_base_url": OLLAMA_BASE_URL,
         "ollama_url": OLLAMA_URL,
-        "model": OLLAMA_MODEL
+        "model": OLLAMA_MODEL,
     })

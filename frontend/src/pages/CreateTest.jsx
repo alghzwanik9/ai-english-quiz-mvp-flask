@@ -1,471 +1,547 @@
-import { useMemo, useState } from "react";
-import Card, { CardContent, CardDesc, CardHeader, CardTitle } from "../ui/Card.jsx";
-import Button from "../ui/Button.jsx";
-import { cn } from "../ui/cn";
-import { upsertTest } from "../lib/storage";
+import React, { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Card, Input, Button, Select, cn } from "../ui";
 import { createTeacherTest, importQuestionsWithAI } from "../services/teacherService";
 
-function TabButton({ active, children, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "px-3 py-2 rounded-xl text-sm font-semibold transition border",
-        active
-          ? "bg-slate-900 text-white border-slate-900 shadow-sm"
-          : "bg-white/70 text-slate-700 border-slate-200/60 hover:bg-white"
-      )}
-    >
-      {children}
-    </button>
-  );
+function makeEmptyQuestion() {
+  return {
+    question: "",
+    choices: ["", "", "", ""],
+    answer: "",
+    explanation: "",
+  };
 }
 
-function Field({ label, placeholder, type = "text", hint, value, onChange }) {
-  return (
-    <label className="block">
-      <div className="text-sm font-semibold text-slate-800 mb-1">{label}</div>
-      <input
-        type={type}
-        placeholder={placeholder}
-        className="inputx"
-        value={value ?? ""}
-        onChange={onChange}
-      />
-      {hint ? <div className="text-xs text-slate-500 mt-1">{hint}</div> : null}
-    </label>
-  );
+function normalizeQuestions(raw) {
+  const arr = Array.isArray(raw) ? raw : [];
+  return arr
+    .map((q) => {
+      const question = String(q?.question || "").trim();
+      const choices = Array.isArray(q?.choices)
+        ? q.choices.map((c) => String(c || "").trim()).filter(Boolean)
+        : [];
+      const explanation = String(q?.explanation || "").trim();
+      let answer = String(q?.answer || "").trim();
+
+      if (!question || choices.length < 2) return null;
+      if (!answer || !choices.includes(answer)) answer = choices[0];
+
+      return { question, choices, answer, explanation };
+    })
+    .filter(Boolean);
 }
 
-function Select({ label, children, hint, value, onChange }) {
-  return (
-    <label className="block">
-      <div className="text-sm font-semibold text-slate-800 mb-1">{label}</div>
-      <select className="selectx" value={value ?? ""} onChange={onChange}>
-        {children}
-      </select>
-      {hint ? <div className="text-xs text-slate-500 mt-1">{hint}</div> : null}
-    </label>
-  );
+function parseMcqText(raw) {
+  const text = String(raw || "").replace(/\r/g, "").trim();
+  if (!text) return [];
+
+  const blocks = text
+    .split(/\n{2,}/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+
+  const out = [];
+
+  for (const block of blocks) {
+    const lines = block
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+
+    if (lines.length < 3) continue;
+
+    const qLine = lines[0].replace(/^\d+\s*[\)\.\-]\s*/, "").trim();
+    if (!qLine) continue;
+
+    const choiceLines = [];
+    let answerLine = "";
+
+    for (let i = 1; i < lines.length; i += 1) {
+      const ln = lines[i];
+
+      if (/^(answer|ans)\s*[:\-]/i.test(ln) || /^الإجابة\s*[:\-]/.test(ln)) {
+        answerLine = ln;
+        break;
+      }
+
+      choiceLines.push(ln);
+    }
+
+    const choices = choiceLines
+      .map((c) => c.replace(/^[A-Da-d١-٤]\s*[\)\.\-:]\s*/, "").trim())
+      .filter(Boolean);
+
+    if (choices.length < 2) continue;
+
+    let answer = "";
+    if (answerLine) {
+      const m = answerLine.match(/[:\-]\s*(.+)$/);
+      const tail = (m?.[1] || "").trim();
+
+      const letter = tail.match(/^[A-Da-d]$/)?.[0]?.toUpperCase() || null;
+      if (letter) {
+        const idx = letter.charCodeAt(0) - "A".charCodeAt(0);
+        answer = choices[idx] || "";
+      } else {
+        answer = tail;
+      }
+    }
+
+    if (!answer || !choices.includes(answer)) answer = choices[0];
+
+    out.push({
+      question: qLine,
+      choices,
+      answer,
+      explanation: "",
+    });
+  }
+
+  return out;
 }
 
-function UploadBox() {
+function Tabs({ value, onChange }) {
+  const items = [
+    { key: "generate", label: "AI Generated" },
+    { key: "manual", label: "Manual" },
+  ];
+
   return (
-    <div className="rounded-2xl border border-dashed border-slate-300/80 bg-white/70 p-6">
-      <div className="font-bold text-slate-900">Upload PDF or CSV</div>
-      <div className="text-sm text-slate-600 mt-1">Drop your file here, or click to browse.</div>
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Button size="sm">Choose File</Button>
-        <Button size="sm" variant="outline">Upload</Button>
-      </div>
-      <div className="mt-3 text-xs text-slate-500">Supported: PDF, CSV • Max 10MB</div>
+    <div className="inline-flex flex-wrap gap-2 p-1 rounded-md bg-zinc-100 border border-black/5 shadow-inner">
+      {items.map((it) => {
+        const active = it.key === value;
+        return (
+          <button
+            key={it.key}
+            type="button"
+            onClick={() => onChange(it.key)}
+            className={cn(
+              "rounded px-6 py-2 text-sm font-black transition-all duration-200",
+              active
+                ? "bg-black text-white shadow-sm"
+                : "text-zinc-500 hover:text-black hover:bg-white"
+            )}
+          >
+            {it.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-function MiniRow({ label, value }) {
+function normalizeChoicesForSelect(choices) {
+  const cleaned = (choices || []).map((c) => String(c || "").trim()).filter(Boolean);
+  if (cleaned.length === 0) return [""];
+  return cleaned;
+}
+
+function QuestionEditor({ questions, setQuestions }) {
+  const updateQ = (idx, patch) => {
+    setQuestions((prev) => prev.map((q, i) => (i === idx ? { ...q, ...patch } : q)));
+  };
+
+  const updateChoice = (qIdx, cIdx, value) => {
+    setQuestions((prev) =>
+      prev.map((q, i) => {
+        if (i !== qIdx) return q;
+        const next = Array.isArray(q.choices) ? [...q.choices] : [];
+        next[cIdx] = value;
+        return { ...q, choices: next };
+      })
+    );
+  };
+
+  const addChoice = (qIdx) => {
+    setQuestions((prev) =>
+      prev.map((q, i) => {
+        if (i !== qIdx) return q;
+        const next = Array.isArray(q.choices) ? [...q.choices, ""] : [""];
+        return { ...q, choices: next };
+      })
+    );
+  };
+
+  const removeChoice = (qIdx, cIdx) => {
+    setQuestions((prev) =>
+      prev.map((q, i) => {
+        if (i !== qIdx) return q;
+        const next = (Array.isArray(q.choices) ? q.choices : []).filter((_, j) => j !== cIdx);
+        const cleaned = next.length ? next : [""];
+        let answer = String(q.answer || "");
+        if (answer && !cleaned.includes(answer)) answer = cleaned[0] || "";
+        return { ...q, choices: cleaned, answer };
+      })
+    );
+  };
+
+  const addQuestion = () => setQuestions((prev) => [...prev, makeEmptyQuestion()]);
+  const removeQuestion = (idx) => setQuestions((prev) => prev.filter((_, i) => i !== idx));
+
   return (
-    <div className="flex items-center justify-between rounded-xl bg-white/70 border border-slate-200/60 px-4 py-3">
-      <div className="text-sm text-slate-600">{label}</div>
-      <div className="text-sm font-bold text-slate-900">{value}</div>
+    <div className="space-y-4">
+      {questions.map((q, qi) => {
+        const choices = Array.isArray(q.choices) ? q.choices : [];
+        const normalizedChoices = choices.map((c) => String(c || ""));
+        const answer = String(q.answer || "");
+
+        return (
+          <div key={qi} className="modern-card p-8 bg-white border border-black relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-1.5 h-full bg-black" />
+            
+            <div className="flex items-center justify-between gap-4 mb-8">
+              <div className="text-xl font-black text-black tracking-tighter">QUESTION #{qi + 1}</div>
+              {questions.length > 1 ? (
+                <button 
+                   type="button" 
+                   className="text-zinc-400 hover:text-black font-black text-xs uppercase tracking-widest transition-colors" 
+                   onClick={() => removeQuestion(qi)}
+                >
+                  [ REMOVE QUESTION ]
+                </button>
+              ) : null}
+            </div>
+
+            <div className="space-y-8">
+              <Input
+                label="Question Statement"
+                placeholder="What would you like to ask?"
+                className="min-h-[100px] border-black text-lg font-black"
+                as="textarea"
+                value={q.question}
+                onChange={(e) => updateQ(qi, { question: e.target.value })}
+              />
+
+              <div className="space-y-6">
+                <div className="text-[10px] uppercase font-black text-zinc-400 tracking-widest">Options</div>
+                <div className="grid md:grid-cols-2 gap-5">
+                  {normalizedChoices.map((c, ci) => (
+                    <div key={ci} className="flex gap-3 items-center">
+                      <div className="flex-1">
+                        <Input
+                          placeholder={`Option ${String.fromCharCode(65 + ci)}`}
+                          value={c}
+                          onChange={(e) => updateChoice(qi, ci, e.target.value)}
+                          className="bg-zinc-50 border-zinc-300 focus:bg-white focus:border-black"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        className="p-2 text-zinc-300 hover:text-black transition-colors"
+                        onClick={() => removeChoice(qi, ci)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex">
+                  <Button className="btn-secondary font-black text-xs uppercase" onClick={() => addChoice(qi)}>
+                    + Add Option
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-8 md:grid-cols-2 pt-8 border-t border-zinc-100">
+                <Select
+                  label="Correct Answer"
+                  value={answer}
+                  onChange={(e) => updateQ(qi, { answer: e.target.value })}
+                  className="border-black"
+                >
+                  {(normalizeChoicesForSelect(normalizedChoices) || []).map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </Select>
+
+                <Input 
+                  label="Explanation (Optional)" 
+                  placeholder="Why is this correct?" 
+                  value={q.explanation} 
+                  onChange={(e) => updateQ(qi, { explanation: e.target.value })}
+                  className="border-black"
+                />
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      <div className="flex flex-wrap gap-4 pt-4">
+        <Button className="btn-secondary px-8 font-black uppercase tracking-widest" onClick={addQuestion}>
+          + Initiate New Question
+        </Button>
+      </div>
+
+      <div className="p-4 rounded-md bg-zinc-100 text-[10px] text-zinc-500 font-bold uppercase tracking-widest text-center border border-zinc-200">
+        Incomplete questions will be omitted during preservation.
+      </div>
     </div>
   );
 }
 
 export default function CreateTest() {
-  const [tab, setTab] = useState("info"); // info | manual | import | ai
+  const nav = useNavigate();
 
+  const [tab, setTab] = useState("generate");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
   const [testId, setTestId] = useState(null);
-  const [testName, setTestName] = useState("");
-  const [material, setMaterial] = useState("");
-  const [numQuestions, setNumQuestions] = useState(10);
-  const [difficulty, setDifficulty] = useState("Easy");
-  const [language, setLanguage] = useState("EN");
-  const [questionType, setQuestionType] = useState("MCQ");
 
-  // settings
-  const [timeLimitMin, setTimeLimitMin] = useState(0);
-  const [passScore, setPassScore] = useState(60);
+  const [name, setName] = useState("");
+  const [subject, setSubject] = useState("General");
+  const [difficulty, setDifficulty] = useState("easy");
+  const [topic, setTopic] = useState("");
 
-  // manual question inputs
-  const [questions, setQuestions] = useState([]);
-  const [qText, setQText] = useState("");
-  const [optA, setOptA] = useState("");
-  const [optB, setOptB] = useState("");
-  const [optC, setOptC] = useState("");
-  const [optD, setOptD] = useState("");
-  const [correct, setCorrect] = useState("A");
-  const [explain, setExplain] = useState("");
+  const [questions, setQuestions] = useState([makeEmptyQuestion()]);
 
-  const [saveMsg, setSaveMsg] = useState("");
-  const [importText, setImportText] = useState("");
-  const [importLoading, setImportLoading] = useState(false);
+  const [aiText, setAiText] = useState("");
+  const [aiDifficulty, setAiDifficulty] = useState("medium");
+  const [aiCount, setAiCount] = useState(5);
 
-  const title = useMemo(() => {
-    if (tab === "info") return "Test Information";
-    if (tab === "manual") return "Add Questions Manually";
-    if (tab === "import") return "Import PDF / CSV";
-    return "Generate with AI";
-  }, [tab]);
+  const [importRaw, setImportRaw] = useState("");
 
-  const safePass = Math.min(100, Math.max(0, Number(passScore) || 0));
-  const safeMin = Math.max(0, Number(timeLimitMin) || 0);
+  const validQuestions = useMemo(() => {
+    return normalizeQuestions(questions);
+  }, [questions]);
 
-  const buildTestObject = (idOverride = null) => {
-    const id = idOverride ?? testId ?? Date.now();
-    return {
-      id,
-      name: String(testName || "").trim(),
-      material: String(material || "").trim(),
-      difficulty,
-      language,
-      questionType,
-      questions: Array.isArray(questions) ? questions : [],
-      timeLimitSec: safeMin * 60,
-      passScore: safePass,
-      updatedAt: Date.now(),
-      createdAt: Date.now(),
-    };
-  };
+  async function ensureTestExists() {
+    if (testId) return testId;
 
-  const onSave = async (goManualAfter = false) => {
-    const name = String(testName || "").trim();
-    if (!name) {
-      setSaveMsg("Please enter Test Name.");
-      setTab("info");
+    const n = String(name || "").trim();
+    if (!n) throw new Error("Test title required");
+
+    const created = await createTeacherTest({
+      name: n,
+      subject: String(subject || "General").trim(),
+      difficulty: String(difficulty || "easy").trim().toLowerCase(),
+      questions: [],
+    });
+
+    if (!created?.id) throw new Error("Failed to secure Draft ID");
+    setTestId(created.id);
+    return created.id;
+  }
+
+  async function handleGenerate() {
+    setBusy(true);
+    setMsg("");
+    try {
+      const n = String(name || "").trim();
+      const s = String(subject || "").trim();
+      const t = String(topic || "").trim();
+
+      if (!n || !s || !t || !aiText.trim()) throw new Error("Missing generation parameters");
+
+      const tid = await ensureTestExists();
+
+      const data = await importQuestionsWithAI({
+        test_id: tid,
+        material: subject,
+        topic: t,
+        text: aiText,
+        difficulty: aiDifficulty,
+        count: Number(aiCount) || 5,
+        save: true,
+      });
+
+      const imported = normalizeQuestions(data?.questions || []);
+      if (!imported.length) throw new Error("Zero questions generated");
+
+      setQuestions(
+        imported.map((q) => ({
+          question: q.question,
+          choices: q.choices.length ? q.choices : ["", "", "", ""],
+          answer: q.answer,
+          explanation: q.explanation || "",
+        }))
+      );
+
+      setMsg(`Success ✅ (${imported.length} Q) | ID: ${tid}`);
+      setTab("manual");
+    } catch (e) {
+      setMsg(e?.message || "Generation failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleImport() {
+    setMsg("");
+    const parsed = parseMcqText(importRaw);
+    if (!parsed.length) {
+      setMsg("Invalid format");
       return;
     }
 
-    const t = buildTestObject();
+    const normalized = normalizeQuestions(parsed);
+    setQuestions(
+      normalized.map((q) => ({
+        question: q.question,
+        choices: q.choices.length ? q.choices : ["", "", "", ""],
+        answer: q.answer,
+        explanation: q.explanation || "",
+      }))
+    );
+    setTab("manual");
+  }
 
-    // حفظ في الباكند (اختبار فعلي) + تخزين محلي كـ draft/نسخة كاش
+  async function handleSave(e) {
+    e.preventDefault();
+    setBusy(true);
+    setMsg("");
     try {
-      if (Array.isArray(questions) && questions.length) {
-        await createTeacherTest({
-          name: t.name,
-          subject: t.material,
-          difficulty: String(difficulty || "easy").toLowerCase(),
-          questions: questions.map((q) => ({
-            question: q.question,
-            choices: q.choices,
-            answer: q.choices?.[Number(q.correctIndex) || 0],
-            explanation: q.explanation,
-          })),
-        });
+      const n = String(name || "").trim();
+      if (!n || !validQuestions.length) throw new Error("Validation failed");
+
+      if (testId) {
+        setMsg("✅ Draft secured. Navigating to results.");
+        nav(`/teacher/results?testId=${testId}`, { replace: true });
+        return;
       }
-    } catch (e) {
-      // ما نكسر التجربة لو الباكند فشل، بس نعرض رسالة خفيفة
-      setSaveMsg(e?.message || "Saved locally. Backend save failed.");
+
+      const payloadQuestions = validQuestions.map((q) => ({
+        question: q.question,
+        choices: q.choices,
+        answer: q.choices.includes(q.answer) ? q.answer : q.choices[0],
+        explanation: q.explanation || "",
+      }));
+
+      const created = await createTeacherTest({
+        name: n,
+        subject: String(subject || "General").trim(),
+        difficulty: String(difficulty || "easy").trim(),
+        questions: payloadQuestions,
+      });
+
+      nav(`/teacher/results?testId=${created.id}`, { replace: true });
+    } catch (e2) {
+      setMsg(e2?.message || "Save failed");
+    } finally {
+      setBusy(false);
     }
-
-    const stored = upsertTest(t);
-    setTestId(stored.id);
-    setSaveMsg("Saved ✅");
-    if (goManualAfter) setTab("manual");
-  };
-
-  const clearManual = () => {
-    setQText("");
-    setOptA("");
-    setOptB("");
-    setOptC("");
-    setOptD("");
-    setCorrect("A");
-    setExplain("");
-  };
-
-  const addQuestion = () => {
-    const qt = String(qText || "").trim();
-    if (!qt) return setSaveMsg("Write Question Text first.");
-
-    const choices = [optA, optB, optC, optD].map((x) => String(x || "").trim());
-    const filled = choices.filter((c) => c.length > 0);
-
-    if (filled.length < 2) return setSaveMsg("Add at least 2 options.");
-    if (!choices[0] || !choices[1]) return setSaveMsg("Option A and B are required.");
-
-    const map = { A: 0, B: 1, C: 2, D: 3 };
-    const correctIndex = map[correct] ?? 0;
-    if (!choices[correctIndex]) return setSaveMsg("Correct option is empty.");
-
-    const q = {
-      id: Date.now(),
-      type: "mcq",
-      question: qt,
-      choices,
-      correctIndex,
-      explanation: String(explain || "").trim(),
-    };
-
-    const next = [q, ...(Array.isArray(questions) ? questions : [])];
-    setQuestions(next);
-    setSaveMsg("Question added ✅");
-
-    // auto-save if test has name
-    const name = String(testName || "").trim();
-    if (name) {
-      const id = testId ?? Date.now();
-      setTestId(id);
-      const t = buildTestObject(id);
-      t.questions = next;
-      upsertTest(t);
-    }
-
-    clearManual();
-  };
-
-  const removeQuestion = (qid) => {
-    const next = (Array.isArray(questions) ? questions : []).filter((q) => String(q.id) !== String(qid));
-    setQuestions(next);
-
-    const name = String(testName || "").trim();
-    if (name && testId) {
-      const t = buildTestObject(testId);
-      t.questions = next;
-      upsertTest(t);
-      setSaveMsg("Question removed ✅");
-    }
-  };
-
-  const onCancel = () => {
-    setTestId(null);
-    setTestName("");
-    setMaterial("");
-    setNumQuestions(10);
-    setDifficulty("Easy");
-    setLanguage("EN");
-    setQuestionType("MCQ");
-    setTimeLimitMin(0);
-    setPassScore(60);
-    setQuestions([]);
-    clearManual();
-    setSaveMsg("");
-    setTab("info");
-  };
+  }
 
   return (
-    <div className="space-y-6">
-      <Card variant="glass">
-        <CardHeader compact>
-          <CardTitle>Create Test</CardTitle>
-          <CardDesc>Build a new test step-by-step with a clean workflow</CardDesc>
-        </CardHeader>
-        <CardContent compact>
-          <div className="flex flex-wrap gap-2">
-            <TabButton active={tab === "info"} onClick={() => setTab("info")}>Info</TabButton>
-            <TabButton active={tab === "manual"} onClick={() => setTab("manual")}>Manual</TabButton>
-            <TabButton active={tab === "import"} onClick={() => setTab("import")}>Import</TabButton>
-            <TabButton active={tab === "ai"} onClick={() => setTab("ai")}>AI</TabButton>
+    <div className="space-y-8 animate-in pb-10">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-4xl font-black text-black tracking-tighter uppercase">Create Assessment</h1>
+          <p className="text-zinc-500 font-bold text-xs uppercase tracking-widest">Manual builder & AI Generation</p>
+        </div>
+        <Button variant="outline" className="btn-secondary h-10 px-6 uppercase font-black text-xs" onClick={() => nav("/teacher")}>
+          [ DASHBOARD ]
+        </Button>
+      </div>
+
+      {msg ? (
+        <div className="p-4 bg-zinc-100 border border-black/10 text-xs font-black uppercase tracking-widest">
+           {msg}
+        </div>
+      ) : null}
+
+      {testId ? (
+        <div className="p-4 bg-black text-white text-[10px] font-black uppercase tracking-widest flex items-center gap-3">
+          <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
+          ACTIVE DRAFT ID: {testId} | AUTO-SYNC ENABLED
+        </div>
+      ) : null}
+
+      <Card className="p-8 border-black shadow-none ring-1 ring-black/5" title="TEST DATA">
+        <form className="space-y-8" onSubmit={handleSave}>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+            <Input label="TITLE" placeholder="Grammar 101" value={name} onChange={(e) => setName(e.target.value)} className="border-black font-black" />
+            <Input label="SUBJECT" value={subject} onChange={(e) => setSubject(e.target.value)} className="border-black font-black" />
+            <Input label="TOPIC" value={topic} onChange={(e) => setTopic(e.target.value)} className="border-black font-black" />
+            <Select label="DIFFICULTY" value={difficulty} onChange={(e) => setDifficulty(e.target.value)} className="border-black font-black">
+              <option value="easy">EASY</option>
+              <option value="medium">MEDIUM</option>
+              <option value="hard">HARD</option>
+            </Select>
           </div>
-        </CardContent>
+  
+          <div className="pt-8 border-t border-black/5 flex gap-4">
+            <Button className="btn-primary h-12 px-10 font-black uppercase tracking-widest text-sm" type="submit" disabled={busy}>
+              {busy ? "PROGRESSING..." : "COMMIT ASSESSMENT"}
+            </Button>
+            <Button className="btn-secondary h-12 px-6 font-black uppercase tracking-widest text-xs" type="button" onClick={() => setQuestions([makeEmptyQuestion()])}>
+              RESET
+            </Button>
+          </div>
+        </form>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <Card variant="glass" className="lg:col-span-8">
-          <CardHeader compact>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <CardTitle>{title}</CardTitle>
-                <CardDesc>Fill the details below</CardDesc>
-              </div>
+      <div className="p-6 border border-black bg-white space-y-6">
+        <div className="flex items-center gap-4">
+          <div className="text-xs font-black uppercase tracking-[0.2em] text-zinc-400">Creation Mode</div>
+          <Tabs value={tab} onChange={setTab} />
+        </div>
 
-              {tab === "ai" ? (
-                <Button size="sm">Generate</Button>
-              ) : tab === "import" ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={importLoading}
-                  onClick={async () => {
-                    const text = String(importText || "").trim();
-                    const mat = String(material || "").trim() || "General";
-                    if (!text) {
-                      setSaveMsg("Paste lesson text to import questions.");
-                      return;
-                    }
-                    setSaveMsg("");
-                    setImportLoading(true);
-                    try {
-                      const res = await importQuestionsWithAI({
-                        material: mat,
-                        text,
-                        difficulty: String(difficulty || "easy").toLowerCase(),
-                        count: Number(numQuestions) || 10,
-                        save: false,
-                      });
-                      const imported = (res.questions || []).map((q) => ({
-                        id: Date.now() + Math.random(),
-                        type: "mcq",
-                        question: q.question,
-                        choices: q.choices,
-                        correctIndex: Math.max(
-                          0,
-                          (q.choices || []).findIndex((c) => c === q.answer)
-                        ),
-                        explanation: q.explanation || "",
-                      }));
-                      if (!imported.length) {
-                        setSaveMsg("No questions returned from AI.");
-                        return;
-                      }
-                      setQuestions(imported);
-                      setTab("manual");
-                      setSaveMsg(`Imported ${imported.length} questions ✅`);
-                    } catch (e) {
-                      setSaveMsg(e?.message || "Failed to import questions.");
-                    } finally {
-                      setImportLoading(false);
-                    }
-                  }}
-                >
-                  {importLoading ? "Importing..." : "Import with AI"}
-                </Button>
-              ) : (
-                <Button size="sm" variant="outline" onClick={() => onSave(true)}>Preview</Button>
-              )}
-            </div>
-          </CardHeader>
-
-          <CardContent compact className="space-y-4">
-            {tab === "info" && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field label="Test Name" placeholder="e.g., Grammar Basics" value={testName} onChange={(e) => setTestName(e.target.value)} />
-                <Field label="Material / Subject" placeholder="e.g., Grammar" value={material} onChange={(e) => setMaterial(e.target.value)} />
-                <Field label="Number of Questions" placeholder="e.g., 10" type="number" value={numQuestions} onChange={(e) => setNumQuestions(Number(e.target.value || 0))} />
-
-                {/* settings */}
-                <Field label="Time Limit (minutes)" placeholder="0 = No time limit" type="number" value={timeLimitMin} onChange={(e) => setTimeLimitMin(Number(e.target.value || 0))} />
-                <Field label="Passing Score (%)" placeholder="e.g., 60" type="number" hint="0–100" value={passScore} onChange={(e) => setPassScore(Number(e.target.value || 0))} />
-
-                <Select label="Difficulty" value={difficulty} onChange={(e) => setDifficulty(e.target.value)}>
-                  <option>Easy</option><option>Medium</option><option>Hard</option>
+        {tab === "generate" ? (
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-6">
+                <Select label="AI LEVEL" value={aiDifficulty} onChange={(e) => setAiDifficulty(e.target.value)} className="border-black font-black">
+                  <option value="easy">EASY</option>
+                  <option value="medium">MEDIUM</option>
+                  <option value="hard">HARD</option>
                 </Select>
-
-                <Select label="Language" hint="Used for instructions & UI hints." value={language} onChange={(e) => setLanguage(e.target.value)}>
-                  <option>EN</option><option>AR</option><option>EN + AR</option>
-                </Select>
-
-                <Select label="Question Type" value={questionType} onChange={(e) => setQuestionType(e.target.value)}>
-                  <option>MCQ</option><option>True / False</option><option>Mixed</option>
-                </Select>
+                <Input label="COUNT" type="number" value={aiCount} onChange={(e) => setAiCount(e.target.value)} className="border-black font-black" />
               </div>
-            )}
 
-            {tab === "manual" && (
-              <div className="space-y-4">
-                <Field label="Question Text" placeholder="Write the question..." value={qText} onChange={(e) => setQText(e.target.value)} />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Field label="Option A" placeholder="A..." value={optA} onChange={(e) => setOptA(e.target.value)} />
-                  <Field label="Option B" placeholder="B..." value={optB} onChange={(e) => setOptB(e.target.value)} />
-                  <Field label="Option C" placeholder="C..." value={optC} onChange={(e) => setOptC(e.target.value)} />
-                  <Field label="Option D" placeholder="D..." value={optD} onChange={(e) => setOptD(e.target.value)} />
-                </div>
+              <Input
+                label="SOURCE MATERIAL"
+                as="textarea"
+                className="min-h-[200px] border-black font-medium"
+                value={aiText}
+                onChange={(e) => setAiText(e.target.value)}
+                placeholder="Paste content for AI processing..."
+              />
 
-                <Select label="Correct Answer" value={correct} onChange={(e) => setCorrect(e.target.value)}>
-                  <option>A</option><option>B</option><option>C</option><option>D</option>
-                </Select>
-
-                <Field label="Explanation (optional)" placeholder="Short explanation..." value={explain} onChange={(e) => setExplain(e.target.value)} />
-
-                <div className="flex flex-wrap gap-2">
-                  <Button onClick={addQuestion}>Add Question</Button>
-                  <Button variant="outline" onClick={clearManual}>Clear</Button>
-                  <Button variant="outline" onClick={() => onSave(false)}>Save Draft</Button>
-                </div>
-
-                {questions.length ? (
-                  <div className="space-y-2">
-                    <div className="text-sm font-bold text-slate-900">Questions Preview</div>
-                    {questions.slice(0, 6).map((q) => (
-                      <div key={q.id} className="rounded-2xl border border-slate-200/60 bg-white/60 p-3 text-sm">
-                        <div className="font-semibold text-slate-900">{q.question}</div>
-                        <div className="text-xs text-slate-500 mt-1">
-                          Correct: {["A", "B", "C", "D"][Number(q.correctIndex) || 0]}
-                        </div>
-                        <div className="mt-2">
-                          <button className="text-xs font-bold text-rose-700 hover:underline" onClick={() => removeQuestion(q.id)}>
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                    {questions.length > 6 ? <div className="text-xs text-slate-500">+ {questions.length - 6} more…</div> : null}
-                  </div>
-                ) : (
-                  <div className="rounded-2xl border border-slate-200/60 bg-white/60 p-4 text-sm text-slate-600">
-                    Tip: Add questions here. Save Draft anytime.
-                  </div>
-                )}
-              </div>
-            )}
-
-            {tab === "import" && (
-              <div className="space-y-4">
-                <UploadBox />
-                <div className="text-sm text-slate-600">
-                  Or paste the lesson/content text below and let AI suggest questions for you.
-                </div>
-                <label className="block">
-                  <div className="text-sm font-semibold text-slate-800 mb-1">Lesson Text</div>
-                  <textarea
-                    className="inputx min-h-[140px] resize-vertical"
-                    placeholder="Paste the lesson or material text here..."
-                    value={importText}
-                    onChange={(e) => setImportText(e.target.value)}
-                  />
-                </label>
-              </div>
-            )}
-
-            {tab === "ai" && (
-              <div className="space-y-4">
-                <Field label="Topic" placeholder="e.g., Past Tense / Travel Vocabulary" value={""} onChange={() => {}} />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Field label="Questions Count" placeholder="e.g., 10" type="number" value={""} onChange={() => {}} />
-                  <Select label="Generation Style" value={"Balanced"} onChange={() => {}}>
-                    <option>Balanced</option><option>Simple</option><option>Challenging</option>
-                  </Select>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <Button>Generate with AI</Button>
-                  <Button variant="outline">Preview</Button>
-                </div>
-
-                <div className="rounded-2xl border border-slate-200/60 bg-white/60 p-4 text-sm text-slate-600">
-                  Tip: Later we can add bilingual feedback (AR/EN) in the student review.
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card variant="glass" className="lg:col-span-4">
-          <CardHeader compact>
-            <CardTitle>Summary</CardTitle>
-            <CardDesc>Quick overview before saving</CardDesc>
-          </CardHeader>
-
-          <CardContent compact className="space-y-3">
-            <MiniRow label="Status" value={testId ? "Draft (Saved)" : "Draft"} />
-            <MiniRow label="Questions" value={String(questions.length)} />
-            <MiniRow label="Language" value={language} />
-            <MiniRow label="Mode" value={tab.toUpperCase()} />
-            <MiniRow label="Time" value={Number(timeLimitMin) ? `${timeLimitMin} min` : "No limit"} />
-            <MiniRow label="Pass" value={`${safePass}%`} />
-
-            <div className="pt-2 grid grid-cols-1 gap-2">
-              <Button className="w-full" onClick={() => onSave(false)}>Save Test</Button>
-              <Button className="w-full" variant="outline" onClick={onCancel}>Cancel</Button>
+              <Button className="btn-primary w-full h-12 font-black uppercase tracking-widest" onClick={handleGenerate} disabled={busy}>
+                {busy ? "GENERATING..." : "START AI GENERATION"}
+              </Button>
             </div>
 
-            {saveMsg ? <div className="text-xs font-semibold text-slate-700 pt-1">{saveMsg}</div> : null}
-
-            <div className="text-xs text-slate-500 pt-2">
-              Save will store a local draft and try to sync with the backend database.
+            <div className="p-8 bg-zinc-50 border border-black/5 flex flex-col justify-center">
+              <div className="text-[10px] font-black text-black/40 uppercase tracking-[0.3em] mb-4">Documentation</div>
+              <div className="space-y-4 text-xs font-bold text-black uppercase leading-loose tracking-widest">
+                <p>• Long material &gt; High precision</p>
+                <p>• Auto-switches to manual mode for review</p>
+                <p>• Unique ID assigned per generation</p>
+              </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        ) : null}
+
+        {tab === "manual" ? (
+          <div className="space-y-6">
+            <div className="p-8 border border-black/10 bg-zinc-50 space-y-5">
+              <Input
+                label="BULK ENTRY"
+                as="textarea"
+                className="min-h-[150px] border-black"
+                value={importRaw}
+                onChange={(e) => setImportRaw(e.target.value)}
+                placeholder="Q) Text? A) Option B) Option Ans: A"
+              />
+              <Button className="btn-secondary px-8 font-black text-xs uppercase" onClick={handleImport} disabled={busy}>
+                [ PARSE INPUT ]
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="space-y-4">
+        <div className="flex items-center gap-4 ml-1">
+           <div className="w-1 h-3 bg-black" />
+           <div className="text-xs font-black uppercase tracking-widest">Question Archive</div>
+        </div>
+        <QuestionEditor questions={questions} setQuestions={setQuestions} />
       </div>
     </div>
   );
